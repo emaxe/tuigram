@@ -1,0 +1,73 @@
+{
+  "name": "@emaxe/tuigram",
+  "version": "1.0.0",
+  "description": "Полнофункциональный TUI & CLI клиент Telegram на Node.js на базе MTProto (teleproto)",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "tuigram": "bin/tuigram.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "keywords": [
+    "telegram",
+    "tui",
+    "cli",
+    "terminal",
+    "mtproto",
+    "teleproto",
+    "chat",
+    "messenger",
+    "blessed",
+    "terminal-client"
+  ],
+  "author": "Maksim Klisin <emaxe.work@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emaxe/tuigram.git"
+  },
+  "homepage": "https://github.com/emaxe/tuigram#readme",
+  "bugs": {
+    "url": "https://github.com/emaxe/tuigram/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "menu": "./run.sh",
+    "tui": "node src/index.js tui",
+    "init": "node src/index.js init",
+    "login": "node src/index.js login",
+    "dialogs": "node src/index.js dialogs",
+    "history": "node src/index.js history",
+    "send": "node src/index.js send",
+    "listen": "node src/index.js listen",
+    "test": "node test/unit.test.js",
+    "prepublishOnly": "node test/unit.test.js && node scripts/check-package.js"
+  },
+  "dependencies": {
+    "big-integer": "^1.6.52",
+    "colorette": "^2.0.20",
+    "dotenv": "^16.4.7",
+    "input": "^1.0.1",
+    "neo-blessed": "^0.2.0",
+    "teleproto": "^1.229.0"
+  }
+}
