@@ -13,6 +13,9 @@
     "bin/",
     "src/",
     "README.md",
+    "README.ru.md",
+    "CHANGELOG.md",
+    "CHANGELOG.ru.md",
     "LICENSE",
     ".env.example"
   ],

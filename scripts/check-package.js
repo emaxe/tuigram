@@ -24,7 +24,17 @@ const FORBIDDEN = [
 ];
 
 /** Файлы, без которых пакет нерабочий. */
-const REQUIRED = ["package.json", "bin/tuigram.js", "src/index.js", "src/config.js", "README.md", "LICENSE"];
+const REQUIRED = [
+    "package.json",
+    "bin/tuigram.js",
+    "src/index.js",
+    "src/config.js",
+    "README.md",
+    "README.ru.md",
+    "CHANGELOG.md",
+    "CHANGELOG.ru.md",
+    "LICENSE"
+];
 
 const errors = [];
 

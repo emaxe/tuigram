@@ -1,78 +1,336 @@
 # 🚀 TuiGram
 
+**English** · [Русский](./README.ru.md)
+
 [![npm](https://img.shields.io/npm/v/@emaxe/tuigram)](https://www.npmjs.com/package/@emaxe/tuigram)
 [![node](https://img.shields.io/node/v/@emaxe/tuigram)](https://nodejs.org)
 [![license](https://img.shields.io/npm/l/@emaxe/tuigram)](./LICENSE)
+[![downloads](https://img.shields.io/npm/dm/@emaxe/tuigram)](https://www.npmjs.com/package/@emaxe/tuigram)
+[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#-installation)
 
-Полнофункциональный терминальный клиент Telegram (TUI + CLI) на Node.js на базе протокола MTProto (`teleproto`).
+A full-featured Telegram terminal client (TUI + CLI) for Node.js, built on the MTProto protocol (`teleproto`).
 
-Позволяет полноценно общаться в Telegram прямо из терминала: просматривать список чатов с разделением по категориям, читать переписку с сохранением форматирования (жирный, курсив, ссылки, подсветка кода), отправлять сообщения, ответы (Reply), редактировать, удалять, ставить реакции и отправлять файлы.
+TuiGram lets you use Telegram entirely from the terminal: browse your dialog list split into categories, read conversations with formatting preserved (bold, italic, links, code highlighting), send messages, reply, edit, delete, react and send files.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-│ 🚀 TuiGram │ Maksim (@maksim) │ ● В сети                                                    │
-│ 👥 Tech Chat [1420 уч.]                          ✍️ Alex печатает...                        │
+│ 🚀 TuiGram │ Alex Rivers (@alex_rivers) │ ● В сети                                          │
+│ 👥 Tech Chat [1420 уч.]                        ✍️ Sam печатает...                           │
 ├──────────────────────────────┬──────────────────────────────────────────────────────────────┤
-│ [1:Все] [2:ЛС] [3:Группы]... │ ─────── Сегодня ───────                                      │
+│ [1:Все] [2:ЛС] [3:Группы] …  │ ──────────────── Сегодня ────────────────                    │
 │ [/] Поиск чатов...           │                                                              │
-│ 📌 👤 Pavel Durov · Let me…  │ Alex [13:40]                                                 │
+│ 📌 👤 Sam Lee · Let me know… │ Sam Lee [13:40]                                              │
 │ 👥 Tech Chat · Nice work! [3]│   Have you checked the latest release?                       │
-│ 🤖 BotFather · Done!   12:10 │ Вы [13:42] ✓✓                                                │
-│ 📢 News Channel · Дайд… [12] │   ┌─ Ответ на сообщение #1042                                │
+│ 🤖 Deploy Bot · Done!   12:10│                                                              │
+│ 📢 News Channel · Дайд… [12] │ Sam Lee [13:41]                                              │
+│ 👤 Mia Novak · 📷 Фото  9:41 │   📷 Фото · 1.8 MB                                           │
+│ 💾 Избранное · Ссылка     вчр│                                                              │
+│                              │ Вы [13:42] ✓✓                                                │
+│                              │   ┌─ Ответ на сообщение #1042                                │
 │                              │   Yes, testing it right now!                                 │
 │                              │   👍 4  🔥 2                                                 │
 │                              ├──────────────────────────────────────────────────────────────┤
-│                              │ ↩️ Ответ на [Alex]: "Have you checked..." [Esc: Отмена]      │
-│                              │ Пишу ответ прямо здесь█                                       │
-│                              │                                                              │
+│                              │ ↩️ Ответ на [Sam Lee]: "Have you checked…"  [Esc]            │
+│                              │ Пишу ответ прямо здесь█                                      │
 ├──────────────────────────────┴──────────────────────────────────────────────────────────────┤
-│ [Tab] Панель │ [Enter] Отправить │ [1-6] Вкладки │ [F1] Помощь │ [Ctrl+A] Действия │ [Ctrl+Q]│
+│ [Tab] Панель │ [Enter] Отправить │ [1-6] Вкладки │ [F1] Помощь │ [Ctrl+Q] Выход             │
 └─────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## ⚡ Особенности и возможности
-
-- **Полноценный интерактивный TUI**:
-  - Двухпанельный адаптивный интерфейс (список чатов слева + история и поле ввода справа);
-  - Поддержка управления клавиатурой и мышью (клики, прокрутка колесом);
-  - Категории чатов: Все, Личные (ЛС), Группы, Каналы, Боты, Непрочитанные;
-  - Мгновенный поиск и фильтрация чатов по названию и `@username` (`/`);
-  - Отображение статуса набора текста («Собеседник печатает...») в реальном времени;
-  - Цветовое форматирование Telegram Entities (Bold, Italic, Monospace Code, URLs, Mentions, Spoilers);
-  - Индикаторы медиа-вложений (фото, видео, документы, голосовые, стикеры, опросы);
-  - Реакции на сообщения (👍, 🔥, ❤️);
-  - Бесконечная пагинация истории сообщений вверх (`PageUp` / `Ctrl+U`);
-  - Контекстные режимы быстрого ответа (Reply `Ctrl+R`) и редактирования (Edit `Ctrl+E`);
-  - Модальные окна: Справка (`F1` / `?`), Сведения о чате (`Ctrl+P`), Меню действий (`Ctrl+A`), Отправка файла (`Ctrl+O`).
-- **Автономный CLI-режим**:
-  - Быстрая отправка сообщений и файлов из командной строки;
-  - Просмотр списка диалогов и истории в терминале;
-  - Потоковый стриминг живых обновлений.
-- **Умная конфигурация**:
-  - Ключи и сессия хранятся в пользовательских директориях ОС — пакет остаётся read-only и переживает обновления;
-  - Безопасное хранение сессии и ключей (`chmod 0600`).
+> **Note on localization.** The TUI and CLI interface strings are currently in Russian only.
+> The client itself works with any language of chat content. Localization of the UI is planned —
+> see [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-## 📦 Установка
+## 📑 Table of contents
 
-### Вариант 1: глобальная установка из npm (рекомендуется)
+- [Features](#-features)
+- [Screenshots](#-screenshots)
+- [Installation](#-installation)
+- [First run](#-first-run)
+- [Where files are stored](#-where-files-are-stored)
+- [Development](#-development)
+- [Keyboard shortcuts](#️-keyboard-shortcuts)
+- [Slash commands](#-slash-commands-in-the-input-box)
+- [Sending files and images](#-sending-files-and-images)
+- [Themes](#-themes)
+- [Command line usage (CLI)](#️-command-line-usage-cli)
+- [Project structure](#-project-structure)
+- [Security](#-security)
+- [Changelog](#-changelog)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
+## ⚡ Features
+
+- **A complete interactive TUI**:
+  - Two-pane adaptive layout (dialog list on the left, history and input box on the right);
+  - Keyboard and mouse control (clicks, wheel scrolling);
+  - Chat categories: All, Direct messages, Groups, Channels, Bots, Unread;
+  - Instant search and filtering of chats by title and `@username` (`/`);
+  - Live typing indicator ("… is typing");
+  - Colored rendering of Telegram entities (bold, italic, monospace code, URLs, mentions, spoilers);
+  - Media attachment indicators (photo, video, document, voice, sticker, poll);
+  - Message reactions (👍, 🔥, ❤️);
+  - Infinite upward pagination of message history (`PageUp` / `Ctrl+U`);
+  - Contextual quick-reply (`Ctrl+R`) and edit (`Ctrl+E`) modes;
+  - Modal windows: Help (`F1` / `?`), Chat info (`Ctrl+P`), Action menu (`Ctrl+A`), Send file (`Ctrl+O`).
+- **Standalone CLI mode**:
+  - Send messages and files straight from the command line;
+  - List dialogs and print chat history in the terminal;
+  - Stream live updates.
+- **Sensible configuration**:
+  - Credentials and session live in OS user directories — the package stays read-only and survives updates;
+  - Session and credentials are written with `0600` permissions.
+
+---
+
+## 🖼 Screenshots
+
+TuiGram lives in the terminal, so instead of images here are exact text captures of its
+screens. Labels, hints and output formats are taken from the interface code rather than
+invented; the data in the examples is fictional.
+
+Note that the interface strings are Russian — the screens below show the client as it
+actually looks today.
+
+The main window is shown at the top of this README. Below are the remaining screens.
+
+### Chat search and filtering
+
+`/` starts an instant search by title and `@username`; the digits `1`–`6` switch categories
+(All, Direct messages, Groups, Channels, Bots, Unread).
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 🚀 TuiGram │ Alex Rivers (@alex_rivers) │ ● В сети                                          │
+├──────────────────────────────┬──────────────────────────────────────────────────────────────┤
+│ [1:Все] [2:ЛС] [3:Группы] …  │ ──────────────── Сегодня ────────────────                    │
+│ [/] tech█                    │                                                              │
+│ 👥 Tech Chat · Nice work! [3]│ Sam Lee [11:02]                                              │
+│ 📢 Tech Digest · Выпуск…     │   Let me know how it goes.                                   │
+│ 🤖 TechSupport Bot · Ок      │                                                              │
+│                              │ Вы [11:05] ✓✓                                                │
+│ 3 из 214 чатов               │   Will do 👍                                                 │
+│                              ├──────────────────────────────────────────────────────────────┤
+│                              │ Введите сообщение…█                                          │
+└──────────────────────────────┴──────────────────────────────────────────────────────────────┘
+```
+
+<details>
+<summary><b>Help — <code>F1</code> / <code>?</code></b></summary>
+
+The full list of shortcuts and slash commands, right inside the client.
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ 🚀 TuiGram — Горячие клавиши и управление                                │
+│                                                                          │
+│ Навигация и фокус:                                                       │
+│   [Tab] / [Shift+Tab]   Фокус: Чаты → Сообщения → Ввод                   │
+│   [↑] / [↓]             Перемещение по списку чатов                      │
+│   [Enter]               Открыть чат / Загрузить историю                  │
+│   [PageUp] / [Ctrl+U]   Прокрутка вверх / старая история                 │
+│                                                                          │
+│ Вкладки фильтрации диалогов:                                             │
+│   [1] Все чаты      [2] Личные (ЛС)      [3] Группы                      │
+│   [4] Каналы        [5] Боты             [6] Непрочитанные               │
+│   [/] Поиск чатов по названию/username                                   │
+│                                                                          │
+│ Работа с сообщениями:                                                    │
+│   [Enter]   Отправить      [Ctrl+R]  Ответить (Reply)                    │
+│   [Ctrl+J]  Перенос строки [Ctrl+E]  Редактировать сообщение             │
+│   [Ctrl+A]  Меню действий  [Ctrl+O]  Отправить файл / фото               │
+│   [Ctrl+P]  Инфо о чате    [Esc]     Закрыть окно / режим                │
+│                                                                          │
+│ Слэш-команды в поле ввода:                                               │
+│   /help  /info  /sendfile  /sendfile <путь>  /clear  /logout             │
+│                                                                          │
+│ Выход:                                                                   │
+│   [Ctrl+Q] или [Ctrl+C]   Безопасный выход из клиента                    │
+│                                                                          │
+│                         [ Закрыть ]                                      │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+</details>
+
+<details>
+<summary><b>Message action menu — <code>Ctrl+A</code></b></summary>
+
+Reply, edit, delete, reactions and attachment download. "Edit" and
+"Download" appear only where they actually apply.
+
+```
+┌──────────────────────────────────────────────────────┐
+│ ⚡ Действия с сообщением #1042                       │
+│ Sam Lee: Have you checked the latest release?        │
+├──────────────────────────────────────────────────────┤
+│ ↩️  Ответить (Reply)                                 │
+│ ✏️  Редактировать текст                              │
+│ 🗑️  Удалить сообщение                                │
+│ 👍  Поставить реакцию 👍                             │
+│ 🔥  Поставить реакцию 🔥                             │
+│ ❤️  Поставить реакцию ❤️                             │
+│ 📥  Скачать медиа-вложение                           │
+│ 📋  Скопировать текст в ввод                         │
+├──────────────────────────────────────────────────────┤
+│ [↑↓] Выбор   [Enter] Выполнить   [Esc] Отмена        │
+└──────────────────────────────────────────────────────┘
+```
+
+</details>
+
+<details>
+<summary><b>Send file — <code>Ctrl+O</code></b></summary>
+
+Several paths separated by `|` are sent as a single album. The line under the
+checkbox states exactly what the file will become on Telegram's side.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ 📤 Отправка файла или документа                            │
+├────────────────────────────────────────────────────────────┤
+│ Путь к файлу (несколько — через |)         [Ctrl+F] Обзор  │
+│ ┌────────────────────────────────────────────────────────┐ │
+│ │ ~/Desktop/photo.png | ~/Desktop/chart.png█             │ │
+│ └────────────────────────────────────────────────────────┘ │
+│ Подпись (необязательно):                                   │
+│ ┌────────────────────────────────────────────────────────┐ │
+│ │ Две картинки с релиза                                  │ │
+│ └────────────────────────────────────────────────────────┘ │
+│ [ ] Как файл, без сжатия      [Ctrl+D]                     │
+│ ✓ photo.png · 2.4 MB · уйдёт как фото                      │
+├────────────────────────────────────────────────────────────┤
+│            [ Отправить ]        [ Отмена ]                 │
+│ [Tab] Поля  [Enter] Далее  [Ctrl+F] Обзор  [Esc] Выход     │
+└────────────────────────────────────────────────────────────┘
+```
+
+</details>
+
+<details>
+<summary><b>File browser — <code>Ctrl+F</code></b></summary>
+
+Navigate folders with the arrow keys; the size of the highlighted file is shown
+at the bottom.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ 📁 Выбор файла: /Users/alex/Desktop                      │
+├──────────────────────────────────────────────────────────┤
+│   ..                                             <папка> │
+│   screenshots/                                   <папка> │
+│ ▸ photo.png                                       2.4 MB │
+│   chart.png                                       812 KB │
+│   report.pdf                                      1.1 MB │
+│   archive.zip                                    18.7 MB │
+├──────────────────────────────────────────────────────────┤
+│ photo.png · 2.4 MB                                       │
+│ [↑↓] Навигация  [Enter] Выбрать  [Esc] Назад             │
+└──────────────────────────────────────────────────────────┘
+```
+
+</details>
+
+<details>
+<summary><b>Chat info — <code>Ctrl+P</code></b></summary>
+
+ID, type, username, member count and description.
+
+```
+┌──────────────────────────────────────────────────────┐
+│ ℹ Информация о чате                                  │
+├──────────────────────────────────────────────────────┤
+│ Название:        Tech Chat                           │
+│ Тип:             supergroup                          │
+│ ID:              -1001234567890                      │
+│ Username:        @techchat                           │
+│ Участников:      1420                                │
+│ Уведомления:     Включены                            │
+│                                                      │
+│ О чате / О себе:                                     │
+│   Чат про терминальные клиенты и MTProto.            │
+├──────────────────────────────────────────────────────┤
+│                    [ Закрыть ]                       │
+└──────────────────────────────────────────────────────┘
+```
+
+</details>
+
+### Command line mode
+
+<details>
+<summary><b>CLI command output</b></summary>
+
+**`tuigram dialogs --limit 8`**
+
+```
+📂 Загрузка диалогов (макс. 8)...
+
+📌 [user      ] Sam Lee                          id=100200301
+   [supergroup] Tech Chat                        id=-1001234567890 (+3)
+   [bot       ] Deploy Bot                       id=100200302
+   [channel   ] News Channel                     id=-1009876543210 (+12)
+   [saved     ] Избранное                        id=100200300
+   [user      ] Mia Novak                        id=100200303 (+1)
+   [group     ] Team Terminal                    id=-400112233
+   [user      ] Nina Ivanova                     id=100200304
+
+Всего получено: 8 диалогов
+```
+
+**`tuigram history @sam_lee --limit 5`**
+
+```
+💬 Загрузка истории для @sam_lee (макс. 5 сообщений)...
+
+[29.08.2026, 11:02:14] #1040 Sam Lee: Let me know how it goes.
+[29.08.2026, 11:05:41] #1041 Вы: Will do 👍
+[29.08.2026, 13:40:07] #1042 Sam Lee: Have you checked the latest release?
+[29.08.2026, 13:41:22] #1043 Sam Lee: 📷 Фото
+[29.08.2026, 13:42:55] #1044 Вы (в ответ на #1042): Yes, testing it right now! (изменено)
+
+Всего отображено: 5 сообщений
+```
+
+**`tuigram listen`**
+
+```
+🟢 Подключено как: Alex Rivers (@alex_rivers)
+Слушаю обновления в реальном времени... Нажмите Ctrl+C для выхода.
+
+[13:40:07] + НОВОЕ [-1001234567890] Sam Lee: Have you checked the latest release?
+[13:41:19] ✍️ ПЕЧАТАЕТ чат: -1001234567890
+[13:42:55] + НОВОЕ [-1001234567890] Вы: Yes, testing it right now!
+[13:43:30] ~ ИЗМЕНЕНО [-1001234567890] #1044: Yes, testing it right now! 🚀
+[13:44:02] - УДАЛЕНО [123456789] IDs: 1039, 1038
+```
+
+</details>
+
+---
+
+## 📦 Installation
+
+### Option 1: global install from npm (recommended)
 
 ```bash
 npm install -g @emaxe/tuigram
 ```
 
-После этого команда `tuigram` доступна в любом каталоге.
+The `tuigram` command is then available from any directory.
 
-### Вариант 2: разовый запуск без установки
+### Option 2: one-off run without installing
 
 ```bash
 npx @emaxe/tuigram
 ```
 
-### Вариант 3: из исходников (для разработки)
+### Option 3: from source (for development)
 
 ```bash
 git clone https://github.com/emaxe/tuigram.git
@@ -83,282 +341,321 @@ npm start
 
 ---
 
-## ⚙️ Первый запуск
+## ⚙️ First run
 
-### 1. Ключи Telegram API
+### 1. Telegram API credentials
 
-Получите `api_id` и `api_hash` на [https://my.telegram.org](https://my.telegram.org) (раздел *API development tools*), затем:
+Get your `api_id` and `api_hash` at [https://my.telegram.org](https://my.telegram.org) (*API development tools*), then run:
 
 ```bash
 tuigram init
 ```
 
-Команда спросит оба ключа и сохранит их с правами `0600`. Для скриптов и CI есть неинтерактивный вариант:
+The command asks for both keys and stores them with `0600` permissions. For scripts and CI there is a non-interactive form:
 
 ```bash
 tuigram init --api-id 1234567 --api-hash 0123456789abcdef0123456789abcdef
 ```
 
-Альтернатива — переменные окружения `TELEGRAM_API_ID` и `TELEGRAM_API_HASH`: они имеют приоритет над файлом настроек.
+Alternatively, use the `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` environment variables — they take precedence over the settings file.
 
-### 2. Авторизация и запуск
+### 2. Authorization and launch
 
 ```bash
 tuigram
 ```
 
-При первом запуске TuiGram предложит ввести номер телефона, код подтверждения из Telegram и пароль 2FA (если включён). После этого сессия сохранится, и последующие запуски будут происходить мгновенно.
+On first launch TuiGram asks for your phone number, the confirmation code from Telegram and your 2FA password (if enabled). The session is then saved and subsequent launches are instant.
 
-Отдельно авторизоваться можно командой `tuigram login`.
+You can also authorize separately with `tuigram login`.
 
-> **В неинтерактивной среде** (CI, пайп, `< /dev/null`) вход по телефону невозможен:
-> `tuigram login` сразу завершится с понятной ошибкой вместо зависания. Если сессия
-> уже есть — команда просто сообщит, под кем вы авторизованы, и вернёт код `0`.
-> Для автоматизации положите готовый `session.txt` в директорию данных
-> (путь подскажет `tuigram paths`).
+> **In a non-interactive environment** (CI, a pipe, `< /dev/null`) phone login is impossible:
+> `tuigram login` exits immediately with a clear error instead of hanging. If a session
+> already exists, the command simply reports who you are signed in as and returns exit
+> code `0`. For automation, drop a ready `session.txt` into the data directory
+> (`tuigram paths` prints the location).
 
 ---
 
-## 📂 Где хранятся файлы
+## 📂 Where files are stored
 
-Ничего не пишется внутрь самого пакета — это важно при глобальной установке, где каталог `node_modules` обычно недоступен на запись и стирается при обновлении.
+Nothing is written inside the package itself — this matters for global installs, where `node_modules` is usually not writable and is wiped on update.
 
-| Что | macOS / Linux | Windows |
+| What | macOS / Linux | Windows |
 |---|---|---|
-| Настройки (`.env`) | `~/.config/tuigram/.env` | `%APPDATA%\tuigram\.env` |
-| Сессия | `~/.local/share/tuigram/session.txt` | `%LOCALAPPDATA%\tuigram\session.txt` |
-| Загрузки из чатов | `~/.local/share/tuigram/downloads/` | `%LOCALAPPDATA%\tuigram\downloads\` |
+| Settings (`.env`) | `~/.config/tuigram/.env` | `%APPDATA%\tuigram\.env` |
+| Session | `~/.local/share/tuigram/session.txt` | `%LOCALAPPDATA%\tuigram\session.txt` |
+| Downloads from chats | `~/.local/share/tuigram/downloads/` | `%LOCALAPPDATA%\tuigram\downloads\` |
 
-Посмотреть актуальные пути и состояние конфигурации:
+To inspect the actual paths and configuration state:
 
 ```bash
 tuigram paths
 ```
 
-Переопределить расположение можно переменными `TUIGRAM_CONFIG_DIR` и `TUIGRAM_DATA_DIR` (учитываются также `XDG_CONFIG_HOME` / `XDG_DATA_HOME`).
+Locations can be overridden with `TUIGRAM_CONFIG_DIR` and `TUIGRAM_DATA_DIR` (`XDG_CONFIG_HOME` / `XDG_DATA_HOME` are honored too).
 
-**Приоритет настроек** (сверху вниз, первое найденное выигрывает):
-1. переменные окружения процесса;
-2. `.env` в корне проекта — только при запуске из клона репозитория;
-3. `~/.config/tuigram/.env` — основной файл установленного CLI.
+**Settings precedence** (top to bottom, first match wins):
+1. process environment variables;
+2. `.env` in the project root — only when running from a repository clone;
+3. `~/.config/tuigram/.env` — the main file for an installed CLI.
 
-Сессия из старых установок (`<проект>/data/session.txt`) переносится в новое расположение автоматически при первом запуске — повторно логиниться не нужно.
-
----
-
-## 🛠 Разработка
-
-При запуске из клона репозитория работает интерактивное меню-диспетчер:
-
-```bash
-./run.sh      # или npm run menu
-```
-
-Оно даёт удобный выбор режима (TUI, логин, диалоги, отправка, тесты, очистка).
-
-Тесты и проверка содержимого будущего npm-пакета:
-
-```bash
-npm test                        # юнит-тесты
-node scripts/check-package.js   # проверка, что в пакет не утекают .env и сессия
-```
+A session from an older installation (`<project>/data/session.txt`) is migrated to the new location automatically on first run — no need to log in again.
 
 ---
 
-## ⌨️ Горячие клавиши
+## 🛠 Development
 
-| Сочетание клавиш | Область | Действие |
+When running from a repository clone, an interactive launcher menu is available:
+
+```bash
+./run.sh      # or npm run menu
+```
+
+It offers a convenient choice of mode (TUI, login, dialogs, send, tests, cleanup).
+
+Tests and a check of the future npm package contents:
+
+```bash
+npm test                        # unit tests
+node scripts/check-package.js   # verifies that .env and the session do not leak into the package
+```
+
+---
+
+## ⌨️ Keyboard shortcuts
+
+| Shortcut | Scope | Action |
 |---|---|---|
-| `Tab` / `Shift+Tab` | Глобально | Фокус по кругу: Список диалогов → Лента сообщений → Поле ввода |
-| `↑` / `↓` | Список диалогов | Выбор чата |
-| `Enter` | Список диалогов | Открыть выбранный чат и загрузить историю |
-| `1` .. `6` | Список диалогов | Переключение категорий: `1:Все`, `2:ЛС`, `3:Группы`, `4:Каналы`, `5:Боты`, `6:Непроч` |
-| `/` | Список диалогов | Поиск / фильтрация чатов |
-| `Enter` | Поле ввода | Отправить набранное сообщение |
-| `Ctrl+J` | Поле ввода | Перенос строки без отправки |
-| `Ctrl+R` | Чат / Ввод | Ответить (Reply) на последнее сообщение |
-| `Ctrl+E` | Чат / Ввод | Редактировать своё последнее сообщение |
-| `Ctrl+A` | Сообщения | Контекстное меню действий (Реакции, Удаление, Скачивание, Ответ) |
-| `Ctrl+O` | Глобально | Отправить файл / фото / документ |
-| `Ctrl+F` | Окно отправки | Обзор файлов (навигация по папкам) |
-| `Ctrl+D` | Окно отправки | Отправить без сжатия, документом |
-| `Ctrl+P` | Глобально | Информация о текущем чате (ID, участники, ссылки) |
-| `PageUp` / `Ctrl+U`| История | Прокрутка вверх / подгрузка старой истории |
-| `PageDown` / `Ctrl+D`| История | Прокрутка вниз |
-| `Esc` | Модальные окна | Закрыть модальное окно / отменить Reply/Edit |
-| `F1` или `?` | Глобально | Окно справки со всеми горячими клавишами |
-| `Ctrl+Q` / `Ctrl+C` | Глобально | Безопасный выход из клиента |
+| `Tab` / `Shift+Tab` | Global | Cycle focus: dialog list → message feed → input box |
+| `↑` / `↓` | Dialog list | Select a chat |
+| `Enter` | Dialog list | Open the selected chat and load its history |
+| `1` .. `6` | Dialog list | Switch category: `1:All`, `2:DM`, `3:Groups`, `4:Channels`, `5:Bots`, `6:Unread` |
+| `/` | Dialog list | Search / filter chats |
+| `Enter` | Input box | Send the typed message |
+| `Ctrl+J` | Input box | Insert a line break without sending |
+| `Ctrl+R` | Chat / Input | Reply to the last message |
+| `Ctrl+E` | Chat / Input | Edit your own last message |
+| `Ctrl+A` | Messages | Context action menu (reactions, delete, download, reply) |
+| `Ctrl+O` | Global | Send a file / photo / document |
+| `Ctrl+F` | Send dialog | File browser (navigate folders) |
+| `Ctrl+D` | Send dialog | Send uncompressed, as a document |
+| `Ctrl+P` | Global | Info about the current chat (ID, members, links) |
+| `PageUp` / `Ctrl+U` | History | Scroll up / load older history |
+| `PageDown` / `Ctrl+D` | History | Scroll down |
+| `Esc` | Modals | Close the modal / cancel reply or edit |
+| `F1` or `?` | Global | Help window with every shortcut |
+| `Ctrl+Q` / `Ctrl+C` | Global | Safely exit the client |
 
 ---
 
-## 💬 Слэш-команды в поле ввода
+## 💬 Slash commands in the input box
 
-В поле ввода сообщения доступны быстрые команды (начинаются с `/`):
+Quick commands are available in the message input box (they start with `/`):
 
-- `/help` — открыть окно помощи;
-- `/info` — подробная информация о текущем чате;
-- `/sendfile` — открыть окно отправки файла;
-- `/sendfile <путь>` — отправить файл сразу;
-- `/sendfile <путь> -- <подпись>` — файл с подписью;
-- `/sendfile <путь> | <путь> -- <подпись>` — альбом из нескольких файлов;
-- `/clear` — очистить экранную ленту сообщений;
-- `/logout` — выйти из аккаунта Telegram.
-
----
-
-## 📎 Отправка файлов и картинок
-
-Три способа: окно `Ctrl+O`, слэш-команда `/sendfile`, консольная команда `sendfile`.
-
-**Окно отправки (`Ctrl+O`)**
-
-- `Ctrl+F` — обзор файлов: навигация по папкам стрелками, `Enter` — войти в папку или выбрать файл, `Esc` — назад. Внизу показывается размер подсвеченного файла.
-- Путь можно и просто ввести: понимает `~/Desktop/foto.png`, пути в кавычках и с экранированными пробелами — то есть перетаскивание файла прямо в терминал работает.
-- Несколько файлов — через `|` в поле пути (или добавляйте их по одному через обзор). До 10 штук уходят одним альбомом.
-- `Ctrl+D` — отправить без сжатия, документом. Полезно, когда важно исходное качество картинки.
-- Строка под чекбоксом сразу показывает, что именно уйдёт: `✓ photo.png · 2.4 MB · уйдёт как фото`.
-- Если в этот момент активен режим ответа (`Ctrl+R`), файл уйдёт **ответом** на сообщение.
-
-**Что уходит фото, а что документом**
-
-`.png`, `.jpg`, `.jpeg` Telegram принимает как сжатое фото; видеоформаты (`.mp4`, `.mov`, `.mkv` и т.п.) — как видео; всё остальное, включая `.webp` и `.heic`, — документом. Флажок «Как файл, без сжатия» (`Ctrl+D`, в CLI — `--as-file`) заставляет отправить документом что угодно.
-
-**Прогресс и отмена**
-
-Во время загрузки в строке состояния идут проценты. `Esc` прерывает отправку.
-
-**Скачивание входящих**
-
-`Ctrl+A` на сообщении → «Скачать медиа-вложение». Файл сохранится в `data/downloads/`.
+- `/help` — open the help window;
+- `/info` — detailed information about the current chat;
+- `/sendfile` — open the send-file dialog;
+- `/sendfile <path>` — send a file right away;
+- `/sendfile <path> -- <caption>` — file with a caption;
+- `/sendfile <path> | <path> -- <caption>` — an album of several files;
+- `/clear` — clear the on-screen message feed;
+- `/logout` — sign out of the Telegram account.
 
 ---
 
-## 🎨 Темы оформления
+## 📎 Sending files and images
 
-Тема задаётся в `.env`:
+Three ways: the `Ctrl+O` dialog, the `/sendfile` slash command, and the `sendfile` console command.
+
+**The send dialog (`Ctrl+O`)**
+
+- `Ctrl+F` — file browser: navigate folders with the arrow keys, `Enter` enters a folder or picks a file, `Esc` goes back. The size of the highlighted file is shown at the bottom.
+- You can also just type a path: `~/Desktop/photo.png`, quoted paths and escaped spaces are understood — so dragging a file into the terminal works.
+- Multiple files — separate them with `|` in the path field (or add them one by one via the browser). Up to 10 are sent as a single album.
+- `Ctrl+D` — send uncompressed, as a document. Useful when the original image quality matters.
+- The line under the checkbox shows exactly what will be sent: `✓ photo.png · 2.4 MB · will be sent as a photo`.
+- If reply mode (`Ctrl+R`) is active at that moment, the file is sent **as a reply** to that message.
+
+**What goes as a photo and what as a document**
+
+Telegram accepts `.png`, `.jpg`, `.jpeg` as compressed photos; video formats (`.mp4`, `.mov`, `.mkv`, etc.) as video; everything else, including `.webp` and `.heic`, as a document. The "As a file, uncompressed" checkbox (`Ctrl+D`, or `--as-file` in the CLI) forces anything to be sent as a document.
+
+**Progress and cancellation**
+
+The status bar shows a percentage during upload. `Esc` aborts the transfer.
+
+**Downloading incoming media**
+
+`Ctrl+A` on a message → "Download attachment". The file is saved to the downloads directory.
+
+---
+
+## 🎨 Themes
+
+The theme is set in `.env`:
 
 ```env
-TUI_THEME=default   # тёмная (по умолчанию)
+TUI_THEME=default   # dark (default)
 TUI_THEME=nord      # Nord
-TUI_THEME=light     # светлая
+TUI_THEME=light     # light
 ```
 
-Все цвета заданы hex-значениями и сводятся к палитре xterm-256 (индексы ≥ 16).
-Именованные цвета (`blue`, `cyan`, `gray`) специально не используются: они
-занимают индексы 0–15, которые тема терминала перекрашивает по-своему — из-за
-этого синий фон мог рисоваться бирюзовым, а серый текст пропадать совсем.
+All colors are given as hex values and are reduced to the xterm-256 palette (indices ≥ 16).
+Named colors (`blue`, `cyan`, `gray`) are deliberately avoided: they occupy indices 0–15,
+which the terminal theme repaints as it pleases — that is why a blue background could render
+as teal and gray text could disappear entirely.
 
-Контраст каждой пары «текст на фоне» проверяется автотестом по WCAG (порог 3:1)
-уже **после** конверсии в xterm-256, то есть ровно в том виде, в каком цвет
-увидит пользователь.
+The contrast of every "text on background" pair is verified by an automated WCAG test
+(threshold 3:1) **after** conversion to xterm-256 — that is, exactly as the user will see it.
 
 ---
 
-## 🛠️ Использование через консоль (CLI)
+## 🛠️ Command line usage (CLI)
 
-TuiGram можно запускать в режиме консольных утилит (при запуске из клона
-репозитория подставьте `node bin/tuigram.js` вместо `tuigram`):
+TuiGram can be used as a set of console utilities (when running from a repository
+clone, substitute `node bin/tuigram.js` for `tuigram`):
 
 ```bash
-# Авторизация
+# Authorization
 tuigram login
 
-# Список диалогов
+# List dialogs
 tuigram dialogs --limit 30
 
-# Просмотр истории чата (@username, ID или me для «Избранного»)
-tuigram history @durov --limit 20
+# View chat history (@username, ID, or `me` for Saved Messages)
+tuigram history @sam_lee --limit 20
 tuigram history me
 
-# Отправка текстового сообщения
-tuigram send me "Привет из терминала!"
-tuigram send @friend "Встречаемся в 18:00"
+# Send a text message
+tuigram send me "Hello from the terminal!"
+tuigram send @friend "See you at 18:00"
 
-# Отправка файла (несколько путей уходят одним альбомом)
+# Send a file (multiple paths are sent as one album)
 tuigram sendfile me ./screenshot.png
-tuigram sendfile me ~/a.png ~/b.png --caption "Две картинки"
-tuigram sendfile me ~/photo.png --as-file   # без сжатия, документом
+tuigram sendfile me ~/a.png ~/b.png --caption "Two pictures"
+tuigram sendfile me ~/photo.png --as-file   # uncompressed, as a document
 
-# Живой стрим обновлений в реальном времени
+# Live stream of real-time updates
 tuigram listen
 ```
 
 ---
 
-## 📁 Структура проекта
+## 📁 Project structure
 
 ```
 TuiGram/
 ├── bin/
-│   └── tuigram.js               # CLI исполняемый файл
+│   └── tuigram.js               # CLI executable
 ├── src/
-│   ├── index.js                 # Главная точка входа (TUI / CLI роутер)
-│   ├── config.js                # Пути пользовательских директорий и загрузчик .env
-│   ├── state.js                 # Реактивное централизованное хранилище состояния
+│   ├── index.js                 # Main entry point (TUI / CLI router)
+│   ├── config.js                # User directory paths and .env loader
+│   ├── state.js                 # Reactive centralized state store
 │   ├── telegram/
-│   │   ├── client.js            # Создание и управление MTProto клиентом
-│   │   ├── auth.js              # Интерактивный логин-визард и 2FA
-│   │   ├── dialogs.js           # Получение, фильтрация и поиск диалогов
-│   │   ├── messages.js          # Загрузка истории, отправка, правка, файлы, реакции
-│   │   ├── listener.js          # Живой фоновый слушатель событий MTProto
-│   │   ├── entities.js          # Парсинг пиров, типы чатов и кэш сущностей
-│   │   └── formatter.js         # Telegram Entities -> Blessed ANSI форматирование
+│   │   ├── client.js            # MTProto client creation and management
+│   │   ├── auth.js              # Interactive login wizard and 2FA
+│   │   ├── dialogs.js           # Fetching, filtering and searching dialogs
+│   │   ├── messages.js          # History loading, sending, editing, files, reactions
+│   │   ├── listener.js          # Live background MTProto event listener
+│   │   ├── entities.js          # Peer parsing, chat types and entity cache
+│   │   └── formatter.js         # Telegram entities -> Blessed ANSI formatting
 │   ├── ui/
-│   │   ├── screen.js            # Управление Blessed Screen
-│   │   ├── theme.js             # Темы оформления (Default Dark, Nord, Light)
-│   │   ├── app.js               # Главный координатор интерфейса
+│   │   ├── screen.js            # Blessed screen management
+│   │   ├── theme.js             # Themes (Default Dark, Nord, Light)
+│   │   ├── app.js               # Main interface coordinator
 │   │   └── components/
-│   │       ├── header.js        # Верхняя шапка и статус подключения
-│   │       ├── chatList.js      # Список диалогов со скроллом, табами и поиском
-│   │       ├── chatView.js      # Лента сообщений с автоскроллом и форматированием
-│   │       ├── inputBox.js      # Поле ввода с плашкой Reply/Edit и историей
-│   │       ├── statusBar.js     # Нижняя строка подсказок и тостов
+│   │       ├── header.js        # Top header and connection status
+│   │       ├── chatList.js      # Dialog list with scrolling, tabs and search
+│   │       ├── chatView.js      # Message feed with autoscroll and formatting
+│   │       ├── inputBox.js      # Input box with reply/edit banner and history
+│   │       ├── statusBar.js     # Bottom hint line and toasts
 │   │       └── modals/
-│   │           ├── helpModal.js     # Окно справки
-│   │           ├── chatInfoModal.js # Окно информации о чате
-│   │           ├── actionModal.js   # Меню действий с сообщением
-│   │           ├── fileModal.js     # Диалог отправки файла
-│   │           └── confirmModal.js  # Диалог подтверждения
+│   │           ├── helpModal.js     # Help window
+│   │           ├── chatInfoModal.js # Chat info window
+│   │           ├── actionModal.js   # Message action menu
+│   │           ├── fileModal.js     # Send-file dialog
+│   │           └── confirmModal.js  # Confirmation dialog
 │   ├── cli/
-│   │   ├── cliCommands.js       # Автономные CLI команды
-│   │   ├── init.js              # tuigram init / paths — настройка и диагностика
-│   │   └── formatters.js        # Консольные форматтеры таблиц и логов
+│   │   ├── cliCommands.js       # Standalone CLI commands
+│   │   ├── init.js              # tuigram init / paths — setup and diagnostics
+│   │   └── formatters.js        # Console table and log formatters
 │   └── utils/
-│       ├── storage.js           # Файловые операции и сохранение сессий
-│       └── time.js              # Форматирование времени и дат
+│       ├── storage.js           # File operations and session persistence
+│       └── time.js              # Time and date formatting
 ├── scripts/
-│   └── check-package.js         # Предпубликационная проверка npm-пакета
+│   └── check-package.js         # Pre-publish npm package check
 ├── test/
-│   └── unit.test.js             # Юнит-тесты
-├── .env.example                 # Пример конфигурации
-├── run.sh                       # Меню-диспетчер для разработки
+│   └── unit.test.js             # Unit tests
+├── .env.example                 # Configuration example
+├── run.sh                       # Development launcher menu
+├── AGENTS.md                    # Codebase rules (source of truth for AI agents)
+├── CHANGELOG.md
 ├── LICENSE
 ├── package.json
-└── README.md
+├── README.md
+└── README.ru.md
 ```
 
-> В опубликованный npm-пакет попадают только `bin/`, `src/`, `README.md`, `LICENSE`
-> и `.env.example` — см. поле `files` в `package.json`.
+> The published npm package contains only `bin/`, `src/`, `README.md`, `README.ru.md`,
+> `CHANGELOG.md`, `LICENSE` and `.env.example` — see the `files` field in `package.json`.
 
 ---
 
-## 🔒 Безопасность
+## 🔒 Security
 
-**Где лежит авторизация.** Единственный файл — `session.txt` в директории данных
-(`~/.local/share/tuigram/` или `%LOCALAPPDATA%\tuigram\`; путь можно сменить через
-`TUIGRAM_DATA_DIR`, посмотреть — командой `tuigram paths`). Внутри строка
-`StringSession` от MTProto: версия формата, номер дата-центра, его адрес и порт,
-и 256-байтный `authKey`, закодированные в base64. Пароля и кода подтверждения там нет.
+**Where the authorization lives.** A single file — `session.txt` in the data directory
+(`~/.local/share/tuigram/` or `%LOCALAPPDATA%\tuigram\`; the location can be changed with
+`TUIGRAM_DATA_DIR` and inspected with `tuigram paths`). It holds an MTProto `StringSession`:
+the format version, the data-center number, its address and port, and a 256-byte `authKey`,
+base64-encoded. Neither your password nor the confirmation code is stored there.
 
-- Файл сессии и файл настроек сохраняются с правами `0600` — чтение и запись только владельцу.
-- Ни сессия, ни ключи не лежат внутри пакета: `npm update` их не затрагивает.
-- `data/` и `.env` в `.gitignore` и исключены из npm-пакета полем `files`;
-  проверка `node scripts/check-package.js` падает, если секрет всё же попал в сборку.
-- **`authKey` хранится в открытом виде**: base64 — это кодирование, а не шифрование.
-  Кто прочитает файл, тот получит полный доступ к аккаунту без телефона, кода и 2FA.
-  Не кладите его в общие папки и незашифрованные бэкапы. Если файл утёк —
-  завершите сеанс в официальном клиенте («Настройки → Устройства»), это отзовёт ключ
-  на сервере, и строка станет бесполезной.
-- `/logout` в TUI отзывает ключ на сервере и удаляет файл сессии.
-- Никакие данные не передаются сторонним серверам — прямое соединение с официальными
-  серверами Telegram MTProto.
+- The session file and the settings file are written with `0600` permissions — owner read/write only.
+- Neither the session nor the credentials live inside the package: `npm update` does not touch them.
+- `data/` and `.env` are in `.gitignore` and excluded from the npm package via the `files` field;
+  `node scripts/check-package.js` fails if a secret ends up in the build anyway.
+- **The `authKey` is stored in the clear**: base64 is an encoding, not encryption.
+  Anyone who reads the file gets full access to the account without the phone, the code or 2FA.
+  Do not put it in shared folders or unencrypted backups. If the file leaks,
+  terminate the session in an official client (*Settings → Devices*) — that revokes the key
+  on the server and makes the string useless.
+- `/logout` in the TUI revokes the key on the server and deletes the session file.
+- No data is sent to third-party servers — the client connects directly to the official
+  Telegram MTProto servers.
+
+---
+
+## 📜 Changelog
+
+All notable changes are recorded in [CHANGELOG.md](./CHANGELOG.md).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and versioning follows [SemVer](https://semver.org/).
+
+---
+
+## 🤝 Contributing
+
+Bug reports and pull requests are welcome:
+[issues](https://github.com/emaxe/tuigram/issues).
+
+Before submitting changes:
+
+```bash
+npm test                        # unit tests must be green
+node scripts/check-package.js   # .env and the session must not reach the package
+```
+
+Codebase rules for humans and AI agents live in [AGENTS.md](./AGENTS.md) — the single
+source of truth for architecture, style, testing and security. If you work with
+Claude Code, Cursor or Copilot, start there.
+
+Both README versions (`README.md` and `README.ru.md`) must be updated together.
+
+---
+
+## 📄 License
+
+[MIT](./LICENSE) © Maksim Klisin
+
+TuiGram is an unofficial client. The project is not affiliated with,
+nor endorsed by, Telegram Messenger Inc.
