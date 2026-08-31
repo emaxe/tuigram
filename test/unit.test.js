@@ -5,10 +5,14 @@ import { formatMessageText, escapeBlessed, describeMedia, setMessagePalette } fr
 import { getTheme, themes } from "../src/ui/theme.js";
 import { formatChatTime, formatMessageTime, formatDateDivider, formatFileSize, formatDuration } from "../src/utils/time.js";
 import { upsertEnv, escapeEnvValue, isValidApiId, isValidApiHash, saveCredentials } from "../src/cli/init.js";
+import { parseProxyConfig, formatProxyUrl } from "../src/config.js";
+import { createHttpConnectSocket, TuiGramNetSockets } from "../src/telegram/socket.js";
 import { assertInteractiveInput } from "../src/telegram/auth.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import http from "node:http";
+import net from "node:net";
 
 console.log("▶ Запуск юнит-тестов TuiGram...");
 
@@ -621,6 +625,304 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     }
 
     console.log("  \u2713 auth interactivity tests passed");
+}
+
+// ─── Тесты прокси (парсинг конфигурации и сетевые сокеты) ─────────────────────
+{
+    // 1. Парсинг PROXY_URL
+    const httpNoAuth = parseProxyConfig({ PROXY_URL: "http://127.0.0.1:8080" });
+    assert.deepEqual(httpNoAuth, {
+        type: "http",
+        host: "127.0.0.1",
+        port: 8080,
+        ip: "127.0.0.1",
+        timeout: 10,
+        http: true,
+    });
+
+    const httpWithAuth = parseProxyConfig({ PROXY_URL: "http://admin:secret123@proxy.example.com:3128" });
+    assert.deepEqual(httpWithAuth, {
+        type: "http",
+        host: "proxy.example.com",
+        port: 3128,
+        username: "admin",
+        password: "secret123",
+        ip: "proxy.example.com",
+        timeout: 10,
+        http: true,
+    });
+
+    const socks5NoAuth = parseProxyConfig({ PROXY_URL: "socks5://127.0.0.1:1080" });
+    assert.deepEqual(socks5NoAuth, {
+        type: "socks5",
+        host: "127.0.0.1",
+        port: 1080,
+        ip: "127.0.0.1",
+        socksType: 5,
+        timeout: 10,
+    });
+
+    const socks5WithAuth = parseProxyConfig({ PROXY_URL: "socks5://myuser:mypass@10.0.0.5:1080", PROXY_TIMEOUT: "15" });
+    assert.deepEqual(socks5WithAuth, {
+        type: "socks5",
+        host: "10.0.0.5",
+        port: 1080,
+        username: "myuser",
+        password: "mypass",
+        ip: "10.0.0.5",
+        socksType: 5,
+        timeout: 15,
+    });
+
+    const socks4Proxy = parseProxyConfig({ PROXY_URL: "socks4://127.0.0.1:1080" });
+    assert.deepEqual(socks4Proxy, {
+        type: "socks4",
+        host: "127.0.0.1",
+        port: 1080,
+        ip: "127.0.0.1",
+        socksType: 4,
+        timeout: 10,
+    });
+
+    // Декодирование спецсимволов в логине/пароле
+    const encodedAuth = parseProxyConfig({ PROXY_URL: "http://user%40domain:p%40ss%3Aword@127.0.0.1:8080" });
+    assert.equal(encodedAuth.username, "user@domain");
+    assert.equal(encodedAuth.password, "p@ss:word");
+
+    // Парсинг через отдельные переменные окружения
+    const separateVars = parseProxyConfig({
+        PROXY_TYPE: "socks5",
+        PROXY_HOST: "192.168.1.100",
+        PROXY_PORT: "9050",
+        PROXY_USERNAME: "toruser",
+        PROXY_PASSWORD: "torpassword",
+    });
+    assert.deepEqual(separateVars, {
+        type: "socks5",
+        host: "192.168.1.100",
+        port: 9050,
+        username: "toruser",
+        password: "torpassword",
+        ip: "192.168.1.100",
+        socksType: 5,
+        timeout: 10,
+    });
+
+    // Фолбэк на HTTPS_PROXY / HTTP_PROXY / ALL_PROXY (и их строчные варианты)
+    const fallbackHttps = parseProxyConfig({ HTTPS_PROXY: "http://proxy.local:8080" });
+    assert.equal(fallbackHttps.host, "proxy.local");
+    assert.equal(fallbackHttps.port, 8080);
+
+    const fallbackLower = parseProxyConfig({ all_proxy: "socks5://127.0.0.1:9050" });
+    assert.equal(fallbackLower.type, "socks5");
+    assert.equal(fallbackLower.port, 9050);
+
+    // Некорректные/пустые конфигурации
+    assert.equal(parseProxyConfig({}), null);
+    assert.equal(parseProxyConfig({ PROXY_URL: "" }), null);
+    assert.equal(parseProxyConfig({ PROXY_HOST: "" }), null);
+    assert.equal(parseProxyConfig({ PROXY_URL: "not-a-valid-url:::" }), null);
+
+    // 2. Форматирование прокси для вывода (маскирование пароля)
+    assert.equal(formatProxyUrl(null), "не используется");
+    assert.equal(formatProxyUrl(httpNoAuth), "http://127.0.0.1:8080");
+    assert.equal(formatProxyUrl(httpWithAuth), "http://admin:***@proxy.example.com:3128");
+    assert.equal(formatProxyUrl(socks5WithAuth), "socks5://myuser:***@10.0.0.5:1080");
+    assert.equal(formatProxyUrl({ type: "http", host: "127.0.0.1", port: 8080, username: "admin" }), "http://admin@127.0.0.1:8080");
+
+    // 3. Тесты HTTP CONNECT туннелирования с мок-сервером
+    const mockHttpProxy = http.createServer();
+    const validHttpAuth = "Basic " + Buffer.from("proxyuser:proxypass").toString("base64");
+
+    mockHttpProxy.on("connect", (req, clientSocket, head) => {
+        const auth = req.headers["proxy-authorization"];
+        if (req.url === "auth-required.target:443" && auth !== validHttpAuth) {
+            clientSocket.write("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Proxy\"\r\n\r\n");
+            clientSocket.end();
+            return;
+        }
+        if (req.url === "forbidden.target:443") {
+            clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+            clientSocket.end();
+            return;
+        }
+        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        clientSocket.on("data", (data) => clientSocket.write(data));
+    });
+
+    await new Promise((resolve) => mockHttpProxy.listen(0, "127.0.0.1", resolve));
+    const proxyPort = mockHttpProxy.address().port;
+
+    try {
+        // Успешное HTTP CONNECT без авторизации
+        const socketNoAuth = await createHttpConnectSocket({
+            proxyHost: "127.0.0.1",
+            proxyPort,
+            targetHost: "open.target",
+            targetPort: 443,
+        });
+        const receivedData = await new Promise((resolve) => {
+            socketNoAuth.on("data", (data) => resolve(data.toString()));
+            socketNoAuth.write("PING");
+        });
+        assert.equal(receivedData, "PING");
+        socketNoAuth.destroy();
+
+        // Успешное HTTP CONNECT с авторизацией
+        const socketWithAuth = await createHttpConnectSocket({
+            proxyHost: "127.0.0.1",
+            proxyPort,
+            targetHost: "auth-required.target",
+            targetPort: 443,
+            username: "proxyuser",
+            password: "proxypass",
+        });
+        const receivedAuthData = await new Promise((resolve) => {
+            socketWithAuth.on("data", (data) => resolve(data.toString()));
+            socketWithAuth.write("AUTH_PING");
+        });
+        assert.equal(receivedAuthData, "AUTH_PING");
+        socketWithAuth.destroy();
+
+        // Ошибка 407 при неверной авторизации
+        await assert.rejects(
+            async () => {
+                await createHttpConnectSocket({
+                    proxyHost: "127.0.0.1",
+                    proxyPort,
+                    targetHost: "auth-required.target",
+                    targetPort: 443,
+                    username: "wronguser",
+                    password: "wrongpass",
+                });
+            },
+            /407 Proxy Authentication Required/,
+            "должна быть ошибка 407 при неверных учетных данных"
+        );
+
+        // Ошибка при коде ответа 403
+        await assert.rejects(
+            async () => {
+                await createHttpConnectSocket({
+                    proxyHost: "127.0.0.1",
+                    proxyPort,
+                    targetHost: "forbidden.target",
+                    targetPort: 443,
+                });
+            },
+            /403/,
+            "должна быть ошибка при коде ответа 403"
+        );
+
+        // Тест TuiGramNetSockets через HTTP CONNECT
+        const netSocket = new TuiGramNetSockets({
+            type: "http",
+            host: "127.0.0.1",
+            port: proxyPort,
+        });
+        await netSocket.connect(443, "open.target");
+        netSocket.write(Buffer.from("NET_SOCKET_TEST"));
+        const netData = await netSocket.readExactly("NET_SOCKET_TEST".length);
+        assert.equal(netData.toString(), "NET_SOCKET_TEST");
+        await netSocket.close();
+    } finally {
+        mockHttpProxy.close();
+    }
+
+    // 4. Тесты SOCKS5 прокси с мок-сервером
+    function createMockSocks5Server(expectedAuth = null) {
+        return net.createServer((socket) => {
+            let state = "init";
+            socket.on("data", (data) => {
+                if (state === "init") {
+                    if (data[0] !== 5) return socket.destroy();
+                    if (expectedAuth) {
+                        socket.write(Buffer.from([5, 2]));
+                        state = "auth";
+                    } else {
+                        socket.write(Buffer.from([5, 0]));
+                        state = "connect";
+                    }
+                } else if (state === "auth") {
+                    const ulen = data[1];
+                    const user = data.subarray(2, 2 + ulen).toString();
+                    const plen = data[2 + ulen];
+                    const pass = data.subarray(3 + ulen, 3 + ulen + plen).toString();
+                    if (user === expectedAuth.user && pass === expectedAuth.pass) {
+                        socket.write(Buffer.from([1, 0]));
+                        state = "connect";
+                    } else {
+                        socket.write(Buffer.from([1, 1]));
+                        socket.destroy();
+                    }
+                } else if (state === "connect") {
+                    if (data[1] !== 1) return socket.destroy();
+                    socket.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+                    state = "pipe";
+                    socket.on("data", (d) => socket.write(d));
+                }
+            });
+        });
+    }
+
+    // Тест SOCKS5 без авторизации
+    const mockSocksNoAuth = createMockSocks5Server(null);
+    await new Promise((resolve) => mockSocksNoAuth.listen(0, "127.0.0.1", resolve));
+    const socksPortNoAuth = mockSocksNoAuth.address().port;
+
+    try {
+        const socksSocket = new TuiGramNetSockets({
+            type: "socks5",
+            host: "127.0.0.1",
+            port: socksPortNoAuth,
+        });
+        await socksSocket.connect(443, "149.154.167.50");
+        socksSocket.write(Buffer.from("SOCKS5_PING"));
+        const socksData = await socksSocket.readExactly("SOCKS5_PING".length);
+        assert.equal(socksData.toString(), "SOCKS5_PING");
+        await socksSocket.close();
+    } finally {
+        mockSocksNoAuth.close();
+    }
+
+    // Тест SOCKS5 с авторизацией
+    const mockSocksAuth = createMockSocks5Server({ user: "tguser", pass: "tgpass" });
+    await new Promise((resolve) => mockSocksAuth.listen(0, "127.0.0.1", resolve));
+    const socksPortAuth = mockSocksAuth.address().port;
+
+    try {
+        const socksSocketAuth = new TuiGramNetSockets({
+            type: "socks5",
+            host: "127.0.0.1",
+            port: socksPortAuth,
+            username: "tguser",
+            password: "tgpass",
+        });
+        await socksSocketAuth.connect(443, "149.154.167.50");
+        socksSocketAuth.write(Buffer.from("SOCKS5_AUTH_PING"));
+        const authData = await socksSocketAuth.readExactly("SOCKS5_AUTH_PING".length);
+        assert.equal(authData.toString(), "SOCKS5_AUTH_PING");
+        await socksSocketAuth.close();
+
+        // Проверка отказа при неверных реквизитах
+        const socksWrongAuth = new TuiGramNetSockets({
+            type: "socks5",
+            host: "127.0.0.1",
+            port: socksPortAuth,
+            username: "baduser",
+            password: "badpass",
+        });
+        await assert.rejects(
+            async () => {
+                await socksWrongAuth.connect(443, "149.154.167.50");
+            },
+            /authentication|rejected|closed/i
+        );
+    } finally {
+        mockSocksAuth.close();
+    }
+
+    console.log("  ✓ proxy parsing and network socket tests passed");
 }
 
 console.log("\n\u2705 Все юнит-тесты TuiGram успешно пройдены!\n");

@@ -4,6 +4,7 @@ import { StringSession } from "teleproto/sessions/index.js";
 import { Logger, LogLevel } from "teleproto/extensions/Logger.js";
 import { config } from "../config.js";
 import { saveSessionFile, readFileSafe } from "../utils/storage.js";
+import { TuiGramNetSockets } from "./socket.js";
 
 /**
  * Читает сохранённую строку сессии.
@@ -42,17 +43,24 @@ export function clearSession() {
 export function buildClient(sessionString = readSession()) {
     config.assertCredentials();
 
+    const clientParams = {
+        connectionRetries: 10,
+        autoReconnect: true,
+        retryDelay: 1500,
+        baseLogger: new Logger(LogLevel.ERROR),
+        useWSS: false,
+    };
+
+    if (config.proxy) {
+        clientParams.proxy = config.proxy;
+        clientParams.networkSocket = TuiGramNetSockets;
+    }
+
     const client = new TelegramClient(
         new StringSession(sessionString),
         config.apiId,
         config.apiHash,
-        {
-            connectionRetries: 10,
-            autoReconnect: true,
-            retryDelay: 1500,
-            baseLogger: new Logger(LogLevel.ERROR),
-            useWSS: false,
-        }
+        clientParams
     );
 
     return client;

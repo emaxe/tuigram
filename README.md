@@ -55,6 +55,7 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
 - [Slash commands](#-slash-commands-in-the-input-box)
 - [Sending files and images](#-sending-files-and-images)
 - [Themes](#-themes)
+- [Proxy configuration](#-proxy-configuration)
 - [Command line usage (CLI)](#️-command-line-usage-cli)
 - [Project structure](#-project-structure)
 - [Security](#-security)
@@ -511,6 +512,35 @@ The contrast of every "text on background" pair is verified by an automated WCAG
 
 ---
 
+## 🌐 Proxy configuration
+
+TuiGram supports routing MTProto connections through HTTP (including HTTPS CONNECT) and SOCKS5/SOCKS4 proxies — both with and without username/password authentication.
+
+Proxy options can be configured in `.env` (or via environment variables):
+
+**Single URL:**
+```env
+PROXY_URL=http://127.0.0.1:8080
+PROXY_URL=http://user:password@proxy.example.com:8080
+PROXY_URL=socks5://127.0.0.1:1080
+PROXY_URL=socks5://user:password@127.0.0.1:1080
+```
+
+**Or separate variables:**
+```env
+PROXY_TYPE=http         # http, https, socks5, socks4
+PROXY_HOST=127.0.0.1
+PROXY_PORT=8080
+PROXY_USERNAME=user     # optional
+PROXY_PASSWORD=password # optional
+PROXY_TIMEOUT=10        # timeout in seconds (default: 10)
+```
+
+Standard environment variables `HTTPS_PROXY`, `HTTP_PROXY`, and `ALL_PROXY` are also supported as fallbacks.
+The active proxy status can be inspected using `tuigram paths`.
+
+---
+
 ## 🛠️ Command line usage (CLI)
 
 TuiGram can be used as a set of console utilities (when running from a repository
@@ -554,6 +584,7 @@ TuiGram/
 │   ├── state.js                 # Reactive centralized state store
 │   ├── telegram/
 │   │   ├── client.js            # MTProto client creation and management
+│   │   ├── socket.js            # MTProto network transport and proxy tunneling (HTTP/SOCKS5)
 │   │   ├── auth.js              # Interactive login wizard and 2FA
 │   │   ├── dialogs.js           # Fetching, filtering and searching dialogs
 │   │   ├── messages.js          # History loading, sending, editing, files, reactions

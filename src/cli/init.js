@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import input from "input";
 import { bold, cyan, green, yellow, dim } from "colorette";
-import { config } from "../config.js";
+import { config, formatProxyUrl } from "../config.js";
 
 /** Сколько раз переспрашивать значение, прежде чем сдаться. */
 const MAX_ATTEMPTS = 3;
@@ -193,5 +193,6 @@ export function cmdPaths() {
     console.log(`  Сессия:          ${config.sessionPath} ${sessionExists ? green("(есть)") : dim("(нет)")}`);
     console.log(`  Загрузки:        ${config.downloadsDir}`);
     console.log(`  Ключи API:       ${config.apiId && config.apiHash ? green("заданы") : yellow("не заданы — запустите tuigram init")}`);
+    console.log(`  Прокси:          ${config.proxy ? green(formatProxyUrl(config.proxy)) : dim("не используется")}`);
     console.log("");
 }

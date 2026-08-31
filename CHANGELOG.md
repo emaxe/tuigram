@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - English localization of the TUI and CLI interface strings.
 
+## [1.1.0] — 2026-08-31
+
+### Added
+
+- Support for HTTP/HTTPS (via HTTP CONNECT) and SOCKS5/SOCKS4 proxies with optional username and password authentication.
+- Proxy configuration options via `.env` (`PROXY_URL` or `PROXY_TYPE`/`PROXY_HOST`/`PROXY_PORT`/`PROXY_USERNAME`/`PROXY_PASSWORD`) and standard environment variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`).
+- Display of active proxy status with password masking in `tuigram paths`.
+
 ## [1.0.1] — 2026-08-29
 
 Documentation and packaging only — no runtime changes.
@@ -103,6 +111,7 @@ First public release.
 - A WCAG contrast test (3:1 threshold) applied to every theme **after** conversion
   to xterm-256 — the colors are checked exactly as the user sees them.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/emaxe/tuigram/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/emaxe/tuigram/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/emaxe/tuigram/releases/tag/v1.0.0

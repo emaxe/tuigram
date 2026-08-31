@@ -13,6 +13,14 @@
 
 - Английская локализация строк интерфейса TUI и CLI.
 
+## [1.1.0] — 2026-08-31
+
+### Добавлено
+
+- Поддержка работы через HTTP/HTTPS (HTTP CONNECT) и SOCKS5/SOCKS4 прокси, как с авторизацией по логину и паролю, так и без неё.
+- Настройка прокси через `.env` (`PROXY_URL` или `PROXY_TYPE`/`PROXY_HOST`/`PROXY_PORT`/`PROXY_USERNAME`/`PROXY_PASSWORD`) и стандартные переменные окружения (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`).
+- Отображение активного прокси с маскированием пароля в выводе команды `tuigram paths`.
+
 ## [1.0.1] — 2026-08-29
 
 Только документация и упаковка — поведение клиента не менялось.
@@ -105,6 +113,7 @@
 - Тест контраста по WCAG (порог 3:1) для каждой темы — **после** конверсии в xterm-256,
   то есть ровно в том виде, в каком цвет увидит пользователь.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/emaxe/tuigram/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/emaxe/tuigram/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/emaxe/tuigram/releases/tag/v1.0.0
