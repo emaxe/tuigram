@@ -43,8 +43,79 @@ export async function startTui(client, me) {
     state.setConnectionStatus("connected");
 
     // 1. Создание визуальных компонентов
-    const header = createHeader(screen, theme);
-    const statusBar = createStatusBar(screen, theme);
+    const header = createHeader(screen, theme, {
+        onHelp: () => {
+            releaseInputs();
+            helpModal.show();
+        },
+        onChatInfo: () => {
+            if (state.activeChat) {
+                releaseInputs();
+                chatInfoModal.show(state.activeChat);
+            } else {
+                statusBar.showMessage("Сначала выберите чат слева!", "warning");
+            }
+        },
+        onStatusClick: () => {
+            const statusText = state.connectionStatus === "connected"
+                ? "Подключение активно: MTProto онлайн"
+                : `Статус сети: ${state.connectionStatus}`;
+            statusBar.showMessage(statusText, "info");
+        },
+    });
+
+    const statusBar = createStatusBar(screen, theme, {
+        onFocusNext: () => moveFocus(1),
+        onSelectOrSubmit: () => {
+            const focused = detectFocus();
+            if (focused === "input") {
+                inputBox.textarea.emit("key enter");
+            } else if (focused === "chatList") {
+                chatList.list.emit("key enter");
+            }
+        },
+        onFilterTabs: () => {
+            releaseInputs();
+            chatList.focus();
+            statusBar.showMessage("Фильтры: нажмите 1-6 для выбора вкладки", "info");
+        },
+        onSearch: () => {
+            chatList.searchBox.setValue("");
+            chatList.searchBox.focus();
+            screen.render();
+        },
+        onHelp: () => {
+            releaseInputs();
+            helpModal.show();
+        },
+        onAction: () => {
+            if (!state.activeChat) {
+                statusBar.showMessage("Сначала выберите чат слева!", "warning");
+                return;
+            }
+            const msgs = state.getMessages(state.activeChat.id);
+            if (msgs.length > 0) {
+                releaseInputs();
+                actionModal.show(msgs[msgs.length - 1]);
+            }
+        },
+        onChatInfo: () => {
+            if (state.activeChat) {
+                releaseInputs();
+                chatInfoModal.show(state.activeChat);
+            } else {
+                statusBar.showMessage("Сначала выберите чат слева!", "warning");
+            }
+        },
+        onQuit: () => {
+            releaseInputs();
+            confirmModal.ask("Выйти из TuiGram?", () => {
+                listener?.stop();
+                screen.destroy();
+                process.exit(0);
+            });
+        },
+    });
 
     // Модальные окна
     const helpModal = createHelpModal(screen, theme);
@@ -205,6 +276,21 @@ export async function startTui(client, me) {
         onCancelContext: () => {
             statusBar.showMessage("Режим ответа/редактирования сброшен", "info", 2000);
         },
+        onReplyLast: () => {
+            if (!state.activeChat) return;
+            const msgs = state.getMessages(state.activeChat.id);
+            if (msgs.length > 0) {
+                inputBox.setContext("reply", msgs[msgs.length - 1]);
+            }
+        },
+        onEditLast: () => {
+            if (!state.activeChat) return;
+            const msgs = state.getMessages(state.activeChat.id);
+            const ownMsgs = msgs.filter((m) => m.out);
+            if (ownMsgs.length > 0) {
+                inputBox.setContext("edit", ownMsgs[ownMsgs.length - 1]);
+            }
+        },
         onSlashCommand: (cmd, args) => {
             switch (cmd) {
                 case "help":
@@ -267,6 +353,33 @@ export async function startTui(client, me) {
                     statusBar.showMessage(`Неизвестная команда: /${cmd}. Введите /help для справки.`, "warning");
             }
         },
+    });
+
+    // Переключение фокуса по клику мышью на любую из трех панелей
+    chatList.container.on("click", () => {
+        if (screen.focused !== chatList.list && screen.focused !== chatList.searchBox) {
+            releaseInputs();
+            chatList.focus();
+            statusBar.showMessage("Фокус: список чатов", "info", 2000);
+            screen.render();
+        }
+    });
+
+    chatView.container.on("click", () => {
+        if (screen.focused !== chatView.scrollBox) {
+            releaseInputs();
+            chatView.focus();
+            statusBar.showMessage("Фокус: лента сообщений", "info", 2000);
+            screen.render();
+        }
+    });
+
+    inputBox.container.on("click", () => {
+        if (screen.focused !== inputBox.textarea) {
+            inputBox.focus();
+            statusBar.showMessage("Фокус: поле ввода", "info", 2000);
+            screen.render();
+        }
     });
 
     // 5. Реакция на события состояния

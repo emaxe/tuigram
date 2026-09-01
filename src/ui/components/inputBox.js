@@ -2,6 +2,8 @@ import blessed from "neo-blessed";
 import { escapeBlessed } from "../../telegram/formatter.js";
 import { fg, badge } from "../theme.js";
 
+import { getInputContextActionAt } from "../../utils/mouse.js";
+
 /**
  * Создаёт компонент поля ввода сообщения (нижняя панель).
  * @param {blessed.Widgets.Screen} screen
@@ -10,8 +12,16 @@ import { fg, badge } from "../theme.js";
  * @param {(text: string, context: { mode: string|null, target: object|null }) => void} callbacks.onSubmit
  * @param {() => void} [callbacks.onCancelContext]
  * @param {(command: string, args: string[]) => void} [callbacks.onSlashCommand]
+ * @param {() => void} [callbacks.onReplyLast]
+ * @param {() => void} [callbacks.onEditLast]
  */
-export function createInputBox(screen, theme, { onSubmit, onCancelContext, onSlashCommand } = {}) {
+export function createInputBox(screen, theme, {
+    onSubmit,
+    onCancelContext,
+    onSlashCommand,
+    onReplyLast,
+    onEditLast,
+} = {}) {
     // Высота 5 = рамка (2) + контекстная плашка (1) + две строки ввода (2).
     // При autoPadding у blessed рамка съедает по строке сверху и снизу, поэтому
     // меньшая высота оставляет textarea нулевую высоту и вводимый текст не виден.
@@ -21,6 +31,7 @@ export function createInputBox(screen, theme, { onSubmit, onCancelContext, onSla
         left: "35%",
         right: 0,
         height: 5,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -41,6 +52,8 @@ export function createInputBox(screen, theme, { onSubmit, onCancelContext, onSla
         right: 0,
         height: 1,
         tags: true,
+        mouse: true,
+        clickable: true,
         style: {
             bg: theme.input.contextBg,
             fg: theme.input.contextFg,
@@ -109,6 +122,32 @@ export function createInputBox(screen, theme, { onSubmit, onCancelContext, onSla
         }
         screen.render();
     }
+
+    contextBar.on("click", (data) => {
+        const relX = data.x - (contextBar.aleft || 0);
+        const action = getInputContextActionAt(relX, currentMode);
+        if (action === "cancel") {
+            if (currentMode) {
+                currentMode = null;
+                currentTarget = null;
+                renderContext();
+                onCancelContext?.();
+            }
+        } else if (action === "reply") {
+            onReplyLast?.();
+        } else if (action === "edit") {
+            onEditLast?.();
+        } else if (action === "commands") {
+            textarea.setValue("/");
+            textarea.focus();
+            screen.render();
+        }
+    });
+
+    textarea.on("click", () => {
+        textarea.focus();
+        screen.render();
+    });
 
     textarea.key(["enter"], () => {
         const value = textarea.getValue().trim();

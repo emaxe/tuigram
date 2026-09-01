@@ -4,6 +4,8 @@ import { escapeBlessed } from "../../telegram/formatter.js";
 import { fg, badge } from "../theme.js";
 import unicode from "neo-blessed/lib/unicode.js";
 
+import { getTabByCoordinate } from "../../utils/mouse.js";
+
 /**
  * Создаёт компонент списка диалогов (левая панель).
  * @param {blessed.Widgets.Screen} screen
@@ -20,6 +22,7 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
         left: 0,
         width: "35%",
         bottom: 1,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -40,6 +43,8 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
         right: 0,
         height: 1,
         tags: true,
+        mouse: true,
+        clickable: true,
         style: {
             bg: theme.tabs.bg,
             fg: theme.tabs.fg,
@@ -64,6 +69,17 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
         tabsBox.setContent(rendered);
     }
 
+    tabsBox.on("click", (data) => {
+        const relX = data.x - (tabsBox.aleft || 0);
+        const tabKey = getTabByCoordinate(relX, TAB_KEYS, TAB_NAMES);
+        if (tabKey) {
+            currentTab = tabKey;
+            renderTabs();
+            onTabChange?.(currentTab);
+            screen.render();
+        }
+    });
+
     // 2. Строка поиска / фильтра
     const searchBox = blessed.textbox({
         parent: container,
@@ -72,6 +88,7 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
         right: 0,
         height: 1,
         inputOnFocus: true,
+        mouse: true,
         style: {
             bg: theme.search.bg,
             fg: theme.search.fg,
@@ -79,6 +96,14 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
     });
     const SEARCH_PLACEHOLDER = "[/] Поиск чатов...";
     searchBox.setValue(SEARCH_PLACEHOLDER);
+
+    searchBox.on("click", () => {
+        if (searchBox.getValue() === SEARCH_PLACEHOLDER) {
+            searchBox.setValue("");
+        }
+        searchBox.focus();
+        screen.render();
+    });
 
     // 3. Список диалогов
     const list = blessed.list({
@@ -118,12 +143,30 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
     // не влезающий хвост на вторую строку, которой в элементе высотой 1 просто
     // нет: хвост исчезал, а начатый перед разрывом фон бейджа непрочитанных
     // оставался залитым до края панели. С wrap: false лишнее просто обрезается.
+    // По клику мыши сразу выбираем и открываем диалог.
     const baseCreateItem = list.createItem.bind(list);
     list.createItem = (content) => {
         const item = baseCreateItem(content);
         item.wrap = false;
+        item.on("click", () => {
+            const index = list.getItemIndex(item);
+            if (index !== -1 && currentDialogs[index]) {
+                list.select(index);
+                onSelectDialog?.(currentDialogs[index]);
+            }
+        });
         return item;
     };
+
+    container.on("wheelup", () => {
+        list.select(list.selected - 2);
+        screen.render();
+    });
+
+    container.on("wheeldown", () => {
+        list.select(list.selected + 2);
+        screen.render();
+    });
 
     let currentDialogs = [];
 
@@ -274,6 +317,25 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
     });
 
     renderTabs();
+
+    /** Подсвечивает рамку, когда список диалогов или строка поиска в фокусе. */
+    function setFocusHighlight(active) {
+        container.style.border.fg = active ? theme.borders.focusFg : theme.borders.fg;
+        screen.render();
+    }
+
+    list.on("focus", () => setFocusHighlight(true));
+    list.on("blur", (newTarget) => {
+        if (newTarget !== searchBox && screen.focused !== searchBox) {
+            setFocusHighlight(false);
+        }
+    });
+    searchBox.on("focus", () => setFocusHighlight(true));
+    searchBox.on("blur", (newTarget) => {
+        if (newTarget !== list && screen.focused !== list) {
+            setFocusHighlight(false);
+        }
+    });
 
     return {
         container,

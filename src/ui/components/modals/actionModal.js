@@ -2,6 +2,8 @@ import blessed from "neo-blessed";
 import { escapeBlessed } from "../../../telegram/formatter.js";
 import { fg } from "../../theme.js";
 
+import { isInsideBox } from "../../../utils/mouse.js";
+
 /**
  * Создаёт модальное окно контекстных действий над сообщением.
  * @param {blessed.Widgets.Screen} screen
@@ -19,6 +21,7 @@ export function createActionModal(screen, theme, { onAction } = {}) {
         height: "55%",
         hidden: true,
         tags: true,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -65,6 +68,20 @@ export function createActionModal(screen, theme, { onAction } = {}) {
             },
         },
     });
+
+    const baseCreateItem = list.createItem.bind(list);
+    list.createItem = (content) => {
+        const item = baseCreateItem(content);
+        item.on("click", () => {
+            const index = list.getItemIndex(item);
+            const action = currentActions[index];
+            if (action && currentMsg) {
+                hide();
+                onAction?.(action.id, currentMsg);
+            }
+        });
+        return item;
+    };
 
     let currentMsg = null;
     let currentActions = [];
@@ -127,6 +144,20 @@ export function createActionModal(screen, theme, { onAction } = {}) {
 
     // Фокус получает список — на нём и живут клавиши закрытия.
     list.key(["escape", "q"], hide);
+
+    // Закрытие при клике мышью мимо модального окна
+    screen.on("click", (data) => {
+        if (!modal.visible) return;
+        const inside = isInsideBox(data.x, data.y, {
+            left: modal.aleft,
+            top: modal.atop,
+            width: modal.width,
+            height: modal.height,
+        });
+        if (!inside) {
+            hide();
+        }
+    });
 
     return {
         modal,

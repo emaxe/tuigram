@@ -52,6 +52,7 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
 - [Where files are stored](#-where-files-are-stored)
 - [Development](#-development)
 - [Keyboard shortcuts](#️-keyboard-shortcuts)
+- [Mouse controls](#-mouse-controls)
 - [Slash commands](#-slash-commands-in-the-input-box)
 - [Sending files and images](#-sending-files-and-images)
 - [Themes](#-themes)
@@ -449,6 +450,28 @@ node scripts/check-package.js   # verifies that .env and the session do not leak
 | `Esc` | Modals | Close the modal / cancel reply or edit |
 | `F1` or `?` | Global | Help window with every shortcut |
 | `Ctrl+Q` / `Ctrl+C` | Global | Safely exit the client |
+
+---
+
+## 🖱 Mouse controls
+
+TuiGram fully supports mouse interaction in terminals that support mouse reporting (macOS Terminal, iTerm2, Alacritty, Kitty, Windows Terminal, Linux virtual terminals):
+
+| Action | Target | Result |
+|---|---|---|
+| Click | Left / Middle / Bottom panel | Focus the clicked panel |
+| Click | Chat item in dialog list | Immediately select and open the chat |
+| Click | Filter tabs `1:Все` .. `6:Непроч` | Switch chat category filter |
+| Click | Search bar `[/]` | Focus search box and clear placeholder |
+| Wheel scroll | Dialog list / Message feed | Smooth scroll (scrolling up to the top loads older messages) |
+| Click | Any message line | Open message action menu (reactions, reply, edit, download, delete) |
+| Click | Header logo 🚀 | Open Help window |
+| Click | Header active chat title | Open Chat Info window |
+| Click | Header connection badge | Show active network status |
+| Click | Input context bar | Cancel reply/edit mode or insert `/` |
+| Click | Status bar items | Trigger corresponding action (`[Tab]`, `[F1]`, `[Ctrl+A]`, `[Ctrl+Q]`, etc.) |
+| Click | Outside any modal window | Dismiss / close modal |
+| Click | Buttons in modals | Click buttons (`[ Отправить ]`, `[ Отмена ]`, `[ Закрыть ]`, toggle checkboxes) |
 
 ---
 

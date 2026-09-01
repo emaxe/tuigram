@@ -2,13 +2,21 @@ import blessed from "neo-blessed";
 import { escapeBlessed } from "../../telegram/formatter.js";
 import { fg } from "../theme.js";
 
+import { getHeaderActionAt } from "../../utils/mouse.js";
+
 /**
  * Верхняя шапка приложения с информацией о пользователе, активном чате и статусе соединения.
  * @param {blessed.Widgets.Screen} screen
  * @param {object} theme
+ * @param {object} [callbacks]
+ * @param {() => void} [callbacks.onHelp]
+ * @param {() => void} [callbacks.onChatInfo]
+ * @param {() => void} [callbacks.onStatusClick]
  * @returns {blessed.Widgets.BoxElement & { updateInfo: (data: object) => void }}
  */
-export function createHeader(screen, theme) {
+export function createHeader(screen, theme, { onHelp, onChatInfo, onStatusClick } = {}) {
+    let currentActiveChat = null;
+
     const headerBox = blessed.box({
         parent: screen,
         top: 0,
@@ -17,6 +25,7 @@ export function createHeader(screen, theme) {
         // 4 = рамка (2) + две строки контента (профиль + активный чат)
         height: 4,
         tags: true,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -29,6 +38,19 @@ export function createHeader(screen, theme) {
         },
     });
 
+    headerBox.on("click", (data) => {
+        const relX = data.x - (headerBox.aleft || 0);
+        const relY = data.y - (headerBox.atop || 0);
+        const action = getHeaderActionAt(relX, relY, { hasActiveChat: Boolean(currentActiveChat) });
+        if (action === "help") {
+            onHelp?.();
+        } else if (action === "info") {
+            onChatInfo?.();
+        } else if (action === "status") {
+            onStatusClick?.();
+        }
+    });
+
     /**
      * Обновляет содержимое шапки.
      * @param {object} data
@@ -38,6 +60,7 @@ export function createHeader(screen, theme) {
      * @param {string|null} [data.typingUser]
      */
     headerBox.updateInfo = function ({ me, status = "connected", activeChat, typingUser }) {
+        currentActiveChat = activeChat;
         let statusBadge = fg(theme.status.online, "● В сети");
         if (status === "connecting") {
             statusBadge = fg(theme.status.connecting, "◌ Подключение...");

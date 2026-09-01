@@ -1,5 +1,6 @@
 import blessed from "neo-blessed";
 import { fg } from "../../theme.js";
+import { isInsideBox } from "../../../utils/mouse.js";
 
 /**
  * Создаёт модальное окно подтверждения действия (Да / Нет).
@@ -19,6 +20,7 @@ export function createConfirmModal(screen, theme) {
         height: 8,
         hidden: true,
         tags: true,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -113,7 +115,9 @@ export function createConfirmModal(screen, theme) {
     }
 
     yesBtn.on("press", confirm);
+    yesBtn.on("click", confirm);
     noBtn.on("press", hide);
+    noBtn.on("click", hide);
 
     // Клавиши вешаем на обе кнопки — активна всегда одна из них.
     for (const btn of [yesBtn, noBtn]) {
@@ -124,6 +128,20 @@ export function createConfirmModal(screen, theme) {
             screen.render();
         });
     }
+
+    // Закрытие при клике мышью мимо модального окна
+    screen.on("click", (data) => {
+        if (!modal.visible) return;
+        const inside = isInsideBox(data.x, data.y, {
+            left: modal.aleft,
+            top: modal.atop,
+            width: modal.width,
+            height: modal.height,
+        });
+        if (!inside) {
+            hide();
+        }
+    });
 
     return {
         modal,

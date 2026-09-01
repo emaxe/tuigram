@@ -3,6 +3,8 @@ import { formatMessageTime, formatDateDivider } from "../../utils/time.js";
 import { formatMessageText, escapeBlessed } from "../../telegram/formatter.js";
 import { fg } from "../theme.js";
 
+import { getMessageAtLine } from "../../utils/mouse.js";
+
 /**
  * Создаёт компонент просмотра сообщений чата (правая центральная панель).
  * @param {blessed.Widgets.Screen} screen
@@ -18,6 +20,7 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         left: "35%",
         right: 0,
         bottom: 6,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -54,26 +57,43 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         },
     });
 
+    /** Подсвечивает рамку, когда лента сообщений в фокусе. */
+    function setFocusHighlight(active) {
+        container.style.border.fg = active ? theme.borders.focusFg : theme.borders.fg;
+        screen.render();
+    }
+
+    scrollBox.on("focus", () => setFocusHighlight(true));
+    scrollBox.on("blur", () => setFocusHighlight(false));
+
     let currentMessages = [];
+    let currentRanges = [];
 
     /**
-     * Форматирует список сообщений в единую ленту текста с разметкой Blessed.
+     * Форматирует список сообщений в единую ленту текста с разметкой Blessed
+     * и вычисляет координаты строк каждого сообщения для кликов мыши.
      * @param {Array<object>} messages
-     * @returns {string}
+     * @returns {{ text: string, ranges: Array<{ message: object, startLine: number, endLine: number }> }}
      */
-    function renderMessages(messages) {
+    function renderMessagesWithRanges(messages) {
         if (!messages || messages.length === 0) {
-            return `\n\n  ${fg(theme.muted, "Сообщений пока нет. Напишите первое сообщение ниже!")}`;
+            return {
+                text: `\n\n  ${fg(theme.muted, "Сообщений пока нет. Напишите первое сообщение ниже!")}`,
+                ranges: [],
+            };
         }
 
         let output = "";
         let lastDateString = "";
+        const ranges = [];
+        let lineCursor = 0;
 
         for (const msg of messages) {
             // Разделитель дат
             const dateStr = formatDateDivider(msg.date);
             if (dateStr && dateStr !== lastDateString) {
                 output += `\n  ${fg(theme.chatView.dateDivider, `─────── ${escapeBlessed(dateStr)} ───────`)}\n\n`;
+                lineCursor += 3;
                 lastDateString = dateStr;
             }
 
@@ -92,8 +112,10 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
 
             // Блок ответа (Reply)
             let replyBlock = "";
+            let replyLines = 0;
             if (msg.replyToMsgId) {
                 replyBlock = `  ${fg(theme.chatView.replyBorder, `┌─ Ответ на сообщение #${msg.replyToMsgId}`)}\n`;
+                replyLines = 1;
             }
 
             // Текст сообщения и entities
@@ -118,12 +140,15 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
                 .split("\n")
                 .map((line) => `  ${line}`)
                 .join("\n");
+            const bodyLinesCount = indentedBody.split("\n").length;
 
             // Реакции
             let reactionsLine = "";
+            let reactionLinesCount = 0;
             if (msg.reactions && msg.reactions.length > 0) {
                 const list = msg.reactions.map((r) => `${r.emoticon} ${r.count}`).join("  ");
                 reactionsLine = `\n  ${fg(theme.chatView.reactionFg, `{bold}${list}{/bold}`)}`;
+                reactionLinesCount = 1;
             }
 
             // Метка редактирования
@@ -132,10 +157,17 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
                 editedTag = ` ${fg(theme.chatView.time, "(изменено)")}`;
             }
 
+            const startLine = lineCursor;
+            const totalMsgLines = 1 + replyLines + bodyLinesCount + reactionLinesCount;
+            const endLine = startLine + totalMsgLines - 1;
+
+            ranges.push({ message: msg, startLine, endLine });
+            lineCursor += totalMsgLines + 2;
+
             output += ` ${authorTag}${editedTag}\n${replyBlock}${indentedBody}${reactionsLine}\n\n`;
         }
 
-        return output;
+        return { text: output, ranges };
     }
 
     /**
@@ -148,7 +180,9 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         const prevScroll = scrollBox.getScroll();
         const prevHeight = scrollBox.getScrollHeight();
 
-        scrollBox.setContent(renderMessages(messages));
+        const rendered = renderMessagesWithRanges(messages);
+        currentRanges = rendered.ranges;
+        scrollBox.setContent(rendered.text);
 
         if (autoScrollToBottom) {
             scrollBox.setScrollPerc(100);
@@ -195,8 +229,31 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
     });
 
     scrollBox.on("wheelup", () => {
-        if (scrollBox.getScroll() <= 0) {
-            onLoadMoreHistory?.();
+        handleScrollUp(3);
+    });
+
+    scrollBox.on("wheeldown", () => {
+        handleScrollDown(3);
+    });
+
+    container.on("wheelup", () => {
+        handleScrollUp(3);
+    });
+
+    container.on("wheeldown", () => {
+        handleScrollDown(3);
+    });
+
+    scrollBox.on("click", (data) => {
+        const clickY = data.y;
+        const itop = scrollBox.itop || 0;
+        const lineIndex = clickY - (scrollBox.atop || 0) + scrollBox.getScroll() - itop;
+        const clickedMsg = getMessageAtLine(lineIndex, currentRanges);
+        if (clickedMsg) {
+            onActionMenu?.(clickedMsg);
+        } else {
+            scrollBox.focus();
+            screen.render();
         }
     });
 

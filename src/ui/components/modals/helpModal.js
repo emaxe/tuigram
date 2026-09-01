@@ -1,4 +1,5 @@
 import blessed from "neo-blessed";
+import { isInsideBox } from "../../../utils/mouse.js";
 
 /**
  * Создаёт модальное окно справки по всем горячим клавишам и возможностям.
@@ -15,6 +16,8 @@ export function createHelpModal(screen, theme) {
         height: "80%",
         hidden: true,
         tags: true,
+        mouse: true,
+        scrollable: true,
         border: {
             type: "line",
         },
@@ -45,6 +48,12 @@ export function createHelpModal(screen, theme) {
    ${K_CYAN}[Enter]${K_END}             Открыть выбранный чат / Загрузить историю
    ${K_CYAN}[PageUp] / [Ctrl+U]${K_END} Прокрутка сообщений вверх / Подгрузка старой истории
    ${K_CYAN}[PageDown] / [Ctrl+D]${K_END}Прокрутка сообщений вниз
+
+ {bold}Управление мышью:{/bold}
+   ${K_CYAN}Клик по диалогу${K_END}      Мгновенно открыть чат
+   ${K_CYAN}Колесо мыши${K_END}          Прокрутка списка чатов и сообщений (вверх — подгрузка истории)
+   ${K_CYAN}Клик по сообщению${K_END}    Открыть меню действий над сообщением
+   ${K_CYAN}Клик по вкладкам/кнопкам${K_END} Переключение фильтров и вызов действий
 
  {bold}Вкладки фильтрации диалогов (нажмите цифру в списке чатов):{/bold}
    ${K_YELLOW}[1]${K_END} Все чаты       ${K_YELLOW}[2]${K_END} Личные (ЛС)     ${K_YELLOW}[3]${K_END} Группы
@@ -120,8 +129,23 @@ export function createHelpModal(screen, theme) {
     }
 
     closeBtn.on("press", hide);
+    closeBtn.on("click", hide);
     // Клавиши вешаем на кнопку: blessed отдаёт события только сфокусированному элементу.
     closeBtn.key(["escape", "q", "f1"], hide);
+
+    // Закрытие при клике мышью мимо модального окна
+    screen.on("click", (data) => {
+        if (!modal.visible) return;
+        const inside = isInsideBox(data.x, data.y, {
+            left: modal.aleft,
+            top: modal.atop,
+            width: modal.width,
+            height: modal.height,
+        });
+        if (!inside) {
+            hide();
+        }
+    });
 
     return {
         modal,

@@ -3,6 +3,8 @@ import { escapeBlessed } from "../../../telegram/formatter.js";
 import { idToString } from "../../../telegram/entities.js";
 import { fg } from "../../theme.js";
 
+import { isInsideBox } from "../../../utils/mouse.js";
+
 /**
  * Создаёт модальное окно информации о текущем чате.
  * @param {blessed.Widgets.Screen} screen
@@ -18,6 +20,7 @@ export function createChatInfoModal(screen, theme) {
         height: "60%",
         hidden: true,
         tags: true,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -38,6 +41,7 @@ export function createChatInfoModal(screen, theme) {
         right: 2,
         bottom: 3,
         tags: true,
+        mouse: true,
         scrollable: true,
         style: {
             bg: theme.modal.bg,
@@ -114,8 +118,23 @@ export function createChatInfoModal(screen, theme) {
     }
 
     closeBtn.on("press", hide);
+    closeBtn.on("click", hide);
     // Клавиши вешаем на кнопку: blessed отдаёт события только сфокусированному элементу.
     closeBtn.key(["escape", "q"], hide);
+
+    // Закрытие при клике мышью мимо модального окна
+    screen.on("click", (data) => {
+        if (!modal.visible) return;
+        const inside = isInsideBox(data.x, data.y, {
+            left: modal.aleft,
+            top: modal.atop,
+            width: modal.width,
+            height: modal.height,
+        });
+        if (!inside) {
+            hide();
+        }
+    });
 
     return {
         modal,

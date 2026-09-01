@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { formatFileSize } from "../../../utils/time.js";
 import { fg } from "../../theme.js";
+import { isInsideBox } from "../../../utils/mouse.js";
 
 /**
  * Модальное окно выбора локального файла (обёртка над blessed.filemanager).
@@ -23,6 +24,7 @@ export function createFilePickerModal(screen, theme) {
         height: "60%",
         hidden: true,
         tags: true,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -78,6 +80,8 @@ export function createFilePickerModal(screen, theme) {
         right: 1,
         height: 2,
         tags: true,
+        mouse: true,
+        clickable: true,
         style: { bg: theme.modal.bg, fg: theme.modal.fg },
     });
 
@@ -187,6 +191,21 @@ export function createFilePickerModal(screen, theme) {
     // filemanager сам отдаёт "cancel" по Escape (list.js), но у него нет hide()
     manager.key(["escape", "q"], hide);
     manager.on("cancel", hide);
+    footer.on("click", hide);
+
+    // Закрытие при клике мышью мимо модального окна
+    screen.on("click", (data) => {
+        if (!modal.visible) return;
+        const inside = isInsideBox(data.x, data.y, {
+            left: modal.aleft,
+            top: modal.atop,
+            width: modal.width,
+            height: modal.height,
+        });
+        if (!inside) {
+            hide();
+        }
+    });
 
     return {
         modal,

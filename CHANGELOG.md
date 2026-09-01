@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Comprehensive mouse support across the entire TUI:
+  - Direct panel focus on click (left panel for dialog list, middle panel for message feed, bottom panel for input box).
+  - Single-click dialog selection and immediate opening.
+  - Smooth mouse wheel scrolling for dialog list and message feed with automatic loading of older history when scrolling up past the top.
+  - Clicking on any message opens its contextual action menu (reactions, replies, edits, downloads, deletion).
+  - Clickable filter tabs (`1:Все`, `2:ЛС`, `3:Группы`, `4:Каналы`, `5:Боты`, `6:Непроч`) and search input focusing.
+  - Interactive status bar buttons (`[Tab]`, `[1-6]`, `[/]`, `[F1]`, `[Ctrl+A]`, `[Ctrl+P]`, `[Ctrl+Q]`).
+  - Interactive header elements: click logo for Help, click chat title for Chat Info, click status badge for network state.
+  - Interactive context bar in input box: click to cancel reply/edit mode or trigger shortcuts.
+  - Full mouse navigation inside modals (button clicks, checkbox toggles, file browsing) and dismissing any modal by clicking outside its boundary.
+- Pure mouse coordinate calculation utilities (`src/utils/mouse.js`) with full test coverage in `test/unit.test.js`.
+
 ### Planned
 
 - English localization of the TUI and CLI interface strings.

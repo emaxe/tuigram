@@ -9,6 +9,7 @@ import { parseProxyConfig, formatProxyUrl } from "../src/config.js";
 import { createHttpConnectSocket, TuiGramNetSockets } from "../src/telegram/socket.js";
 import { assertInteractiveInput } from "../src/telegram/auth.js";
 import { strippedPhotoToJpg, decodeImageBuffer, calculateTargetDimensions, resizeRgba, rgbaToHex, rgbaToHalfBlockBlessed, renderImageBuffer, renderStrippedThumbnail, imagePreviewCache } from "../src/utils/image.js";
+import { stringCellWidth, isInsideBox, getTabByCoordinate, buildMessageLineRanges, getMessageAtLine, getStatusBarActionAt, getHeaderActionAt, getInputContextActionAt } from "../src/utils/mouse.js";
 import { normalizeMessage } from "../src/telegram/messages.js";
 import jpegJs from "jpeg-js";
 import { PNG } from "pngjs";
@@ -198,6 +199,41 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     state.addMessage("test_chat", { id: 1000, text: "new" });
     assert.equal(lastEvent?.isNewMessage, true);
     assert.equal(lastEvent?.isUpdate, undefined);
+
+    // Тесты подсветки рамок активного блока при фокусе
+    const releaseInputs = () => {
+        chatList.release?.();
+        inputBox.release?.();
+    };
+
+    assert.equal(chatList.container.style.border.fg, theme.borders.fg);
+    assert.equal(chatView.container.style.border.fg, theme.borders.fg);
+    assert.equal(inputBox.container.style.border.fg, theme.borders.fg);
+
+    chatList.focus();
+    assert.equal(chatList.container.style.border.fg, theme.borders.focusFg, "chatList должен подсвечиваться при фокусе");
+    assert.equal(chatView.container.style.border.fg, theme.borders.fg);
+    assert.equal(inputBox.container.style.border.fg, theme.borders.fg);
+
+    chatList.searchBox.focus();
+    assert.equal(chatList.container.style.border.fg, theme.borders.focusFg, "chatList должен оставаться подсвеченным в поиске");
+
+    releaseInputs();
+    chatView.focus();
+    assert.equal(chatList.container.style.border.fg, theme.borders.fg, "chatList не должен подсвечиваться после потери фокуса");
+    assert.equal(chatView.container.style.border.fg, theme.borders.focusFg, "chatView должен подсвечиваться при фокусе");
+    assert.equal(inputBox.container.style.border.fg, theme.borders.fg);
+
+    releaseInputs();
+    inputBox.focus();
+    assert.equal(chatView.container.style.border.fg, theme.borders.fg, "chatView не должен подсвечиваться после потери фокуса");
+    assert.equal(inputBox.container.style.border.fg, theme.borders.focusFg, "inputBox должен подсвечиваться при фокусе");
+    assert.equal(chatList.container.style.border.fg, theme.borders.fg);
+
+    releaseInputs();
+    chatList.focus();
+    assert.equal(inputBox.container.style.border.fg, theme.borders.fg, "inputBox не должен подсвечиваться после потери фокуса");
+    assert.equal(chatList.container.style.border.fg, theme.borders.focusFg, "chatList снова должен подсвечиваться при фокусе");
 
     state.off("messages_updated", onUpdate);
 
@@ -1122,5 +1158,203 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     console.log("  ✓ image.js & preview rendering tests passed");
 }
 
+// 13. Тесты поддержки мыши и утилит mouse.js
+{
+    // 1. Тест stringCellWidth
+    assert.equal(stringCellWidth("Hello"), 5);
+    assert.equal(stringCellWidth("{bold}Hello{/bold}"), 5);
+    assert.equal(stringCellWidth("🚀"), 2);
+    assert.equal(stringCellWidth(""), 0);
+
+    // 2. Тест isInsideBox
+    const box = { left: 10, top: 5, width: 20, height: 10 };
+    assert.equal(isInsideBox(10, 5, box), true);
+    assert.equal(isInsideBox(29, 14, box), true);
+    assert.equal(isInsideBox(9, 5, box), false);
+    assert.equal(isInsideBox(30, 5, box), false);
+    assert.equal(isInsideBox(10, 4, box), false);
+    assert.equal(isInsideBox(10, 15, box), false);
+    assert.equal(isInsideBox(10, 10, null), false);
+
+    // 3. Тест getTabByCoordinate
+    // " 1:Все " (7 cells: 0..6)
+    // " 2:ЛС " (6 cells: 7..12)
+    // " 3:Группы " (10 cells: 13..22)
+    // " 4:Каналы " (10 cells: 23..32)
+    // " 5:Боты " (8 cells: 33..40)
+    // " 6:Непроч " (10 cells: 41..50)
+    assert.equal(getTabByCoordinate(0), "all");
+    assert.equal(getTabByCoordinate(5), "all");
+    assert.equal(getTabByCoordinate(7), "users");
+    assert.equal(getTabByCoordinate(12), "users");
+    assert.equal(getTabByCoordinate(15), "groups");
+    assert.equal(getTabByCoordinate(25), "channels");
+    assert.equal(getTabByCoordinate(35), "bots");
+    assert.equal(getTabByCoordinate(45), "unread");
+    assert.equal(getTabByCoordinate(60), null);
+    assert.equal(getTabByCoordinate(-1), null);
+
+    // 4. Тест buildMessageLineRanges и getMessageAtLine
+    const messages = [
+        { id: 1, text: "Первое сообщение", date: Date.now() },
+        { id: 2, text: "Второе сообщение\nВторая строка", date: Date.now(), replyToMsgId: 1 },
+    ];
+    const ranges = buildMessageLineRanges(messages);
+    assert.equal(ranges.length, 2);
+    assert.equal(ranges[0].message.id, 1);
+    assert.equal(ranges[1].message.id, 2);
+
+    const msgAtFirst = getMessageAtLine(ranges[0].startLine, ranges);
+    assert.equal(msgAtFirst?.id, 1);
+    const msgAtSecond = getMessageAtLine(ranges[1].startLine, ranges);
+    assert.equal(msgAtSecond?.id, 2);
+    assert.equal(getMessageAtLine(999, ranges), null);
+    assert.equal(getMessageAtLine(-1, ranges), null);
+    assert.deepEqual(buildMessageLineRanges([]), []);
+
+    // 5. Тест getStatusBarActionAt
+    assert.equal(getStatusBarActionAt(5, 120), "focus");
+    assert.equal(getStatusBarActionAt(20, 120), "select");
+    assert.equal(getStatusBarActionAt(45, 120), "tabs");
+    assert.equal(getStatusBarActionAt(60, 120), "search");
+    assert.equal(getStatusBarActionAt(75, 120), "help");
+    assert.equal(getStatusBarActionAt(92, 120), "actions");
+    assert.equal(getStatusBarActionAt(108, 120), "info");
+    assert.equal(getStatusBarActionAt(120, 120), null);
+    assert.equal(getStatusBarActionAt(-5, 120), null);
+
+    // 6. Тест getHeaderActionAt
+    assert.equal(getHeaderActionAt(5, 1, { hasActiveChat: false }), "help");
+    assert.equal(getHeaderActionAt(25, 1, { hasActiveChat: false }), "status");
+    assert.equal(getHeaderActionAt(10, 2, { hasActiveChat: true }), "info");
+    assert.equal(getHeaderActionAt(10, 2, { hasActiveChat: false }), null);
+    assert.equal(getHeaderActionAt(10, 0), null);
+    assert.equal(getHeaderActionAt(10, 3), null);
+
+    // 7. Тест getInputContextActionAt
+    assert.equal(getInputContextActionAt(10, "reply"), "cancel");
+    assert.equal(getInputContextActionAt(10, "edit"), "cancel");
+    assert.equal(getInputContextActionAt(60, null), "reply");
+    assert.equal(getInputContextActionAt(80, null), "edit");
+    assert.equal(getInputContextActionAt(95, null), "commands");
+    assert.equal(getInputContextActionAt(-1, null), null);
+
+    // 8. Интеграционные тесты мыши на компонентах UI
+    const { createHeader } = await import("../src/ui/components/header.js");
+    const { createStatusBar } = await import("../src/ui/components/statusBar.js");
+    const { createChatList } = await import("../src/ui/components/chatList.js");
+    const { createChatView } = await import("../src/ui/components/chatView.js");
+    const { createInputBox } = await import("../src/ui/components/inputBox.js");
+    const { createHelpModal } = await import("../src/ui/components/modals/helpModal.js");
+    const { createConfirmModal } = await import("../src/ui/components/modals/confirmModal.js");
+    const { createActionModal } = await import("../src/ui/components/modals/actionModal.js");
+    const { getTheme } = await import("../src/ui/theme.js");
+    const blessed = (await import("neo-blessed")).default;
+    const { PassThrough } = await import("node:stream");
+    const fs = await import("node:fs");
+
+    const output = fs.createWriteStream("/dev/null");
+    output.isTTY = true;
+    output.columns = 120;
+    output.rows = 40;
+    const input = new PassThrough();
+    input.isTTY = true;
+    input.setRawMode = () => {};
+
+    const testScreen = blessed.screen({
+        smartCSR: true,
+        fullUnicode: true,
+        input,
+        output,
+        terminal: "xterm-256color",
+    });
+    const testTheme = getTheme("default");
+
+    // Проверка кликов в Header
+    let headerHelpClicked = false;
+    let headerInfoClicked = false;
+    const testHeader = createHeader(testScreen, testTheme, {
+        onHelp: () => { headerHelpClicked = true; },
+        onChatInfo: () => { headerInfoClicked = true; },
+    });
+    testHeader.updateInfo({ me: { firstName: "Test" }, activeChat: { title: "Active Chat", type: "user" } });
+    testHeader.emit("click", { x: 5, y: 1 });
+    assert.equal(headerHelpClicked, true, "клик по логотипу в header должен вызывать onHelp");
+    testHeader.emit("click", { x: 5, y: 2 });
+    assert.equal(headerInfoClicked, true, "клик по активному чату в header должен вызывать onChatInfo");
+
+    // Проверка кликов в StatusBar
+    let sbHelpClicked = false;
+    let sbFocusClicked = false;
+    const testStatusBar = createStatusBar(testScreen, testTheme, {
+        onHelp: () => { sbHelpClicked = true; },
+        onFocusNext: () => { sbFocusClicked = true; },
+    });
+    testStatusBar.emit("click", { x: 5, y: 39 });
+    assert.equal(sbFocusClicked, true, "клик по Tab в statusBar должен вызывать onFocusNext");
+    testStatusBar.emit("click", { x: 75, y: 39 });
+    assert.equal(sbHelpClicked, true, "клик по F1 в statusBar должен вызывать onHelp");
+
+    // Проверка клика по вкладкам в ChatList
+    let selectedTab = null;
+    let selectedChat = null;
+    const testChatList = createChatList(testScreen, testTheme, {
+        onTabChange: (tab) => { selectedTab = tab; },
+        onSelectDialog: (d) => { selectedChat = d; },
+    });
+    testChatList.setDialogs([{ id: "10", title: "Test Chat" }]);
+    testChatList.container.children[0].emit("click", { x: 9, y: 4 }); // клик по ЛС (x=9)
+    assert.equal(selectedTab, "users", "клик по вкладке ЛС должен переключать вкладку на users");
+
+    // Проверка выбора диалога по клику на элемент
+    const firstItem = testChatList.list.getItem(0);
+    firstItem.emit("click");
+    assert.equal(selectedChat?.id, "10", "клик по элементу диалога должен вызывать onSelectDialog");
+
+    // Проверка клика по сообщению в ChatView
+    let actionModalMsg = null;
+    const testChatView = createChatView(testScreen, testTheme, {
+        onActionMenu: (msg) => { actionModalMsg = msg; },
+    });
+    testChatView.setMessages([{ id: 123, text: "Clickable message", date: Date.now() }]);
+    testScreen.render();
+    const atop = testChatView.scrollBox.atop || 0;
+    const scroll = testChatView.scrollBox.childBase || testChatView.scrollBox.getScroll() || 0;
+    testChatView.scrollBox.emit("click", { x: 50, y: atop - scroll + 3 });
+    assert.equal(actionModalMsg?.id, 123, "клик по сообщению в chatView должен открывать actionMenu");
+
+    // Проверка кликов в InputBox contextBar
+    let cancelContextCalled = false;
+    const testInputBox = createInputBox(testScreen, testTheme, {
+        onCancelContext: () => { cancelContextCalled = true; },
+    });
+    testInputBox.setContext("reply", { id: 99, text: "reply target" });
+    testInputBox.contextBar.emit("click", { x: 50, y: 35 });
+    assert.equal(cancelContextCalled, true, "клик по contextBar в режиме ответа должен отменять контекст");
+
+    // Проверка закрытия ConfirmModal и ActionModal при клике вне окна
+    const testConfirm = createConfirmModal(testScreen, testTheme);
+    testConfirm.ask("Confirm?", () => {});
+    assert.equal(testConfirm.modal.visible, true);
+    testScreen.emit("click", { x: 0, y: 0 }); // клик в угол экрана мимо модалки
+    assert.equal(testConfirm.modal.visible, false, "клик вне confirmModal должен закрывать окно");
+
+    const testAction = createActionModal(testScreen, testTheme);
+    testAction.show({ id: 55, text: "Action item" });
+    assert.equal(testAction.modal.visible, true);
+    testScreen.emit("click", { x: 0, y: 0 });
+    assert.equal(testAction.modal.visible, false, "клик вне actionModal должен закрывать окно");
+
+    const testHelp = createHelpModal(testScreen, testTheme);
+    testHelp.show();
+    assert.equal(testHelp.modal.visible, true);
+    testScreen.emit("click", { x: 0, y: 0 });
+    assert.equal(testHelp.modal.visible, false, "клик вне helpModal должен закрывать окно");
+
+    testScreen.destroy();
+    console.log("  ✓ mouse support & mouse.js tests passed");
+}
+
 console.log("\n\u2705 Все юнит-тесты TuiGram успешно пройдены!\n");
+
 

@@ -4,6 +4,7 @@ import { inspectLocalFile } from "../../../utils/storage.js";
 import { formatFileSize } from "../../../utils/time.js";
 import { createFilePickerModal } from "./filePickerModal.js";
 import { fg } from "../../theme.js";
+import { isInsideBox } from "../../../utils/mouse.js";
 
 /** Разделитель нескольких путей в поле ввода. */
 const PATH_SEPARATOR = "|";
@@ -27,6 +28,7 @@ export function createFileModal(screen, theme, { onSendFile } = {}) {
         height: 14,
         hidden: true,
         tags: true,
+        mouse: true,
         border: {
             type: "line",
         },
@@ -51,13 +53,15 @@ export function createFileModal(screen, theme, { onSendFile } = {}) {
         style: { bg: theme.modal.bg, fg: theme.modal.fg },
     });
 
-    blessed.box({
+    const browseBar = blessed.box({
         parent: modal,
         top: 2,
         left: 2,
         right: 2,
         height: 1,
         tags: true,
+        mouse: true,
+        clickable: true,
         content: `Путь к файлу ${fg(theme.modal.hintFg, `(несколько — через ${PATH_SEPARATOR})`)}{|}${fg(theme.accent, "[Ctrl+F] Обзор")} `,
         style: { bg: theme.modal.bg, fg: theme.modal.fg },
     });
@@ -69,6 +73,7 @@ export function createFileModal(screen, theme, { onSendFile } = {}) {
         right: 2,
         height: 1,
         inputOnFocus: true,
+        mouse: true,
         style: {
             bg: theme.modal.inputBg,
             fg: theme.modal.inputFg,
@@ -93,6 +98,7 @@ export function createFileModal(screen, theme, { onSendFile } = {}) {
         right: 2,
         height: 1,
         inputOnFocus: true,
+        mouse: true,
         style: {
             bg: theme.modal.inputBg,
             fg: theme.modal.inputFg,
@@ -338,9 +344,35 @@ export function createFileModal(screen, theme, { onSendFile } = {}) {
     });
     captionInput.on("submit", submit);
     sendBtn.on("press", submit);
+    sendBtn.on("click", submit);
     cancelBtn.on("press", hide);
+    cancelBtn.on("click", hide);
     asDocumentCheck.on("check", () => validate({ quiet: true }));
     asDocumentCheck.on("uncheck", () => validate({ quiet: true }));
+
+    browseBar.on("click", openPicker);
+    pathInput.on("click", () => {
+        pathInput.focus();
+        screen.render();
+    });
+    captionInput.on("click", () => {
+        captionInput.focus();
+        screen.render();
+    });
+
+    // Закрытие при клике мышью мимо модального окна
+    screen.on("click", (data) => {
+        if (!modal.visible || picker.modal.visible) return;
+        const inside = isInsideBox(data.x, data.y, {
+            left: modal.aleft,
+            top: modal.atop,
+            width: modal.width,
+            height: modal.height,
+        });
+        if (!inside) {
+            hide();
+        }
+    });
 
     return {
         modal,
