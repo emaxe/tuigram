@@ -13,6 +13,13 @@
 
 - Английская локализация строк интерфейса TUI и CLI.
 
+## [1.2.0] — 2026-09-01
+
+### Добавлено
+
+- Отображение цветных превью изображений прямо в ленте сообщений чата с помощью псевдографики высокого разрешения (Unicode Half-Block `▀` `U+2580`) и мгновенного рендеринга миниатюр `PhotoStrippedSize`.
+- Параметры конфигурации `SHOW_IMAGES`, `IMAGE_MAX_WIDTH` и `IMAGE_MAX_HEIGHT` в `.env` и `config.js` для управления отображением превью и их максимальным размером.
+
 ## [1.1.0] — 2026-08-31
 
 ### Добавлено
@@ -113,7 +120,8 @@
 - Тест контраста по WCAG (порог 3:1) для каждой темы — **после** конверсии в xterm-256,
   то есть ровно в том виде, в каком цвет увидит пользователь.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/emaxe/tuigram/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/emaxe/tuigram/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/emaxe/tuigram/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/emaxe/tuigram/releases/tag/v1.0.0

@@ -55,6 +55,7 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
 - [Slash commands](#-slash-commands-in-the-input-box)
 - [Sending files and images](#-sending-files-and-images)
 - [Themes](#-themes)
+- [Inline image previews](#️-inline-image-previews)
 - [Proxy configuration](#-proxy-configuration)
 - [Command line usage (CLI)](#️-command-line-usage-cli)
 - [Project structure](#-project-structure)
@@ -74,6 +75,7 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
   - Instant search and filtering of chats by title and `@username` (`/`);
   - Live typing indicator ("… is typing");
   - Colored rendering of Telegram entities (bold, italic, monospace code, URLs, mentions, spoilers);
+  - High-resolution inline image previews (Unicode Half-Block `▀` pixel art);
   - Media attachment indicators (photo, video, document, voice, sticker, poll);
   - Message reactions (👍, 🔥, ❤️);
   - Infinite upward pagination of message history (`PageUp` / `Ctrl+U`);
@@ -512,6 +514,23 @@ The contrast of every "text on background" pair is verified by an automated WCAG
 
 ---
 
+## 🖼️ Inline image previews
+
+TuiGram displays color image previews directly in the chat history using high-resolution Unicode half-block characters (`▀` `U+2580`). Each character cell renders 2 vertical subpixels with 24-bit RGB colors, producing crisp, proportional pixel art that scrolls naturally with messages and works across all terminals.
+
+Previews are enabled by default and can be configured in `.env`:
+
+```env
+# Enable/disable image previews in chat (true/false)
+SHOW_IMAGES=true
+
+# Maximum preview size in terminal characters (width x height)
+IMAGE_MAX_WIDTH=36
+IMAGE_MAX_HEIGHT=14
+```
+
+---
+
 ## 🌐 Proxy configuration
 
 TuiGram supports routing MTProto connections through HTTP (including HTTPS CONNECT) and SOCKS5/SOCKS4 proxies — both with and without username/password authentication.
@@ -612,6 +631,7 @@ TuiGram/
 │   │   ├── init.js              # tuigram init / paths — setup and diagnostics
 │   │   └── formatters.js        # Console table and log formatters
 │   └── utils/
+│       ├── image.js             # Image decoding, resizing and Half-Block ANSI rendering
 │       ├── storage.js           # File operations and session persistence
 │       └── time.js              # Time and date formatting
 ├── scripts/

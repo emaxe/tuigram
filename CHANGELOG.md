@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - English localization of the TUI and CLI interface strings.
 
+## [1.2.0] — 2026-09-01
+
+### Added
+
+- Display color image previews directly in chat messages using high-resolution Unicode half-block characters (`▀` `U+2580`) with instant rendering of Telegram stripped thumbnails (`PhotoStrippedSize`).
+- Configuration options `SHOW_IMAGES`, `IMAGE_MAX_WIDTH`, and `IMAGE_MAX_HEIGHT` to control image preview rendering in `.env` and `config.js`.
+
 ## [1.1.0] — 2026-08-31
 
 ### Added
@@ -111,7 +118,8 @@ First public release.
 - A WCAG contrast test (3:1 threshold) applied to every theme **after** conversion
   to xterm-256 — the colors are checked exactly as the user sees them.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/emaxe/tuigram/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/emaxe/tuigram/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/emaxe/tuigram/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/emaxe/tuigram/releases/tag/v1.0.0

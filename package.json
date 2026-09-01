@@ -1,6 +1,6 @@
 {
   "name": "@emaxe/tuigram",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Полнофункциональный TUI & CLI клиент Telegram на Node.js на базе MTProto (teleproto)",
   "type": "module",
   "exports": {
@@ -70,7 +70,9 @@
     "colorette": "^2.0.20",
     "dotenv": "^16.4.7",
     "input": "^1.0.1",
+    "jpeg-js": "^0.4.4",
     "neo-blessed": "^0.2.0",
+    "pngjs": "^7.0.0",
     "teleproto": "^1.229.0"
   }
 }

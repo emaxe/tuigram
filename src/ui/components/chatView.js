@@ -38,7 +38,6 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         bottom: 0,
         tags: true,
         scrollable: true,
-        alwaysScroll: true,
         mouse: true,
         keys: true,
         vi: true,
@@ -99,8 +98,19 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
 
             // Текст сообщения и entities
             let bodyText = formatMessageText(msg.text, msg.entities);
-            if (msg.mediaDescription) {
-                bodyText = bodyText ? `${msg.mediaDescription}\n  ${bodyText}` : msg.mediaDescription;
+
+            // Блок медиа-вложения и превью изображения
+            let mediaBlock = "";
+            if (msg.imagePreview) {
+                mediaBlock = msg.mediaDescription
+                    ? `${msg.mediaDescription}\n${msg.imagePreview}`
+                    : msg.imagePreview;
+            } else if (msg.mediaDescription) {
+                mediaBlock = msg.mediaDescription;
+            }
+
+            if (mediaBlock) {
+                bodyText = bodyText ? `${mediaBlock}\n${bodyText}` : mediaBlock;
             }
 
             // Отступ строк текста сообщения
@@ -135,25 +145,59 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
      */
     function setMessages(messages, autoScrollToBottom = true) {
         currentMessages = messages;
+        const prevScroll = scrollBox.getScroll();
+        const prevHeight = scrollBox.getScrollHeight();
+
         scrollBox.setContent(renderMessages(messages));
+
         if (autoScrollToBottom) {
             scrollBox.setScrollPerc(100);
+        } else {
+            // Сохраняем относительную позицию скролла: если добавились старые сообщения сверху,
+            // компенсируем сдвиг высоты ленты
+            const newHeight = scrollBox.getScrollHeight();
+            const addedLines = newHeight - prevHeight;
+            if (addedLines > 0 && prevScroll > 0) {
+                scrollBox.scrollTo(prevScroll + addedLines);
+            } else if (prevScroll > 0) {
+                scrollBox.scrollTo(prevScroll);
+            }
         }
         screen.render();
     }
 
     // Обработка прокрутки вверх для подгрузки истории
-    scrollBox.key(["pageup", "C-u"], () => {
-        scrollBox.scroll(-10);
+    function handleScrollUp(step = 10) {
+        scrollBox.scroll(-step);
         if (scrollBox.getScroll() <= 0) {
             onLoadMoreHistory?.();
         }
         screen.render();
+    }
+
+    function handleScrollDown(step = 10) {
+        scrollBox.scroll(step);
+        screen.render();
+    }
+
+    scrollBox.key(["pageup", "C-u"], () => handleScrollUp(10));
+    scrollBox.key(["pagedown", "C-d"], () => handleScrollDown(10));
+    scrollBox.key(["up", "k"], () => handleScrollUp(2));
+    scrollBox.key(["down", "j"], () => handleScrollDown(2));
+    scrollBox.key(["home"], () => {
+        scrollBox.scrollTo(0);
+        onLoadMoreHistory?.();
+        screen.render();
+    });
+    scrollBox.key(["end"], () => {
+        scrollBox.setScrollPerc(100);
+        screen.render();
     });
 
-    scrollBox.key(["pagedown", "C-d"], () => {
-        scrollBox.scroll(10);
-        screen.render();
+    scrollBox.on("wheelup", () => {
+        if (scrollBox.getScroll() <= 0) {
+            onLoadMoreHistory?.();
+        }
     });
 
     // Ctrl+M терминал шлёт как "\r" (имя клавиши "return"), поэтому меню действий
@@ -169,6 +213,7 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         container,
         scrollBox,
         setMessages,
+        loadMore: () => onLoadMoreHistory?.(),
         scrollToBottom: () => {
             scrollBox.setScrollPerc(100);
             screen.render();

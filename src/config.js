@@ -251,6 +251,9 @@ export const config = {
     theme: process.env.TUI_THEME || "default",
     autoScroll: String(process.env.AUTO_SCROLL || "true").toLowerCase() === "true",
     showTyping: String(process.env.SHOW_TYPING || "true").toLowerCase() === "true",
+    showImages: String(process.env.SHOW_IMAGES || "true").toLowerCase() !== "false",
+    imageMaxWidth: parseInt(process.env.IMAGE_MAX_WIDTH || "36", 10) || 36,
+    imageMaxHeight: parseInt(process.env.IMAGE_MAX_HEIGHT || "14", 10) || 14,
 
     proxy: parseProxyConfig(),
 

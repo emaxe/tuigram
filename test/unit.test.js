@@ -8,6 +8,10 @@ import { upsertEnv, escapeEnvValue, isValidApiId, isValidApiHash, saveCredential
 import { parseProxyConfig, formatProxyUrl } from "../src/config.js";
 import { createHttpConnectSocket, TuiGramNetSockets } from "../src/telegram/socket.js";
 import { assertInteractiveInput } from "../src/telegram/auth.js";
+import { strippedPhotoToJpg, decodeImageBuffer, calculateTargetDimensions, resizeRgba, rgbaToHex, rgbaToHalfBlockBlessed, renderImageBuffer, renderStrippedThumbnail, imagePreviewCache } from "../src/utils/image.js";
+import { normalizeMessage } from "../src/telegram/messages.js";
+import jpegJs from "jpeg-js";
+import { PNG } from "pngjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -143,8 +147,62 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     assert.ok(item.includes("Pavel Durov"));
     assert.ok(item.includes("[3]"));
 
+    // Тесты chatView: прокрутка, сохранение позиции и подгрузка истории
+    const { createChatView } = await import("../src/ui/components/chatView.js");
+    let loadMoreTriggered = false;
+    const chatView = createChatView(screen, theme, {
+        onLoadMoreHistory: () => {
+            loadMoreTriggered = true;
+        },
+    });
+
+    const testMsgs = Array.from({ length: 30 }, (_, i) => ({
+        id: i + 1,
+        date: Date.now() + i * 1000,
+        out: i % 2 === 0,
+        text: `Сообщение ${i + 1}\nВторая строка ${i + 1}`,
+        senderName: "User",
+    }));
+
+    // Установка сообщений со скроллом в конец
+    chatView.setMessages(testMsgs, true);
+    assert.ok(chatView.scrollBox.getScrollHeight() > chatView.scrollBox.height);
+
+    // Прокрутка наверх вызывает onLoadMoreHistory при достижении верха
+    loadMoreTriggered = false;
+    chatView.scrollBox.scrollTo(0);
+    chatView.scrollBox.emit("key up");
+    assert.equal(loadMoreTriggered, true, "стрелка вверх на 0 строке должна вызывать onLoadMoreHistory");
+
+    loadMoreTriggered = false;
+    chatView.scrollBox.emit("wheelup");
+    assert.equal(loadMoreTriggered, true, "wheelup на 0 строке должен вызывать onLoadMoreHistory");
+
+    // setMessages с autoScrollToBottom=false сохраняет позицию
+    chatView.scrollBox.scrollTo(15);
+    const prevPos = chatView.scrollBox.getScroll();
+    chatView.setMessages(testMsgs, false);
+    assert.equal(chatView.scrollBox.getScroll(), prevPos, "позиция скролла должна сохраняться при фоновом обновлении");
+
+    // Тест флагов событий state
+    const { state } = await import("../src/state.js");
+    let lastEvent = null;
+    const onUpdate = (payload) => { lastEvent = payload; };
+    state.on("messages_updated", onUpdate);
+
+    state.setMessages("test_chat", [{ id: 999, text: "initial" }]);
+    state.updateMessage("test_chat", { id: 999, text: "updated" });
+    assert.equal(lastEvent?.isUpdate, true);
+    assert.equal(lastEvent?.isPrepend, false);
+
+    state.addMessage("test_chat", { id: 1000, text: "new" });
+    assert.equal(lastEvent?.isNewMessage, true);
+    assert.equal(lastEvent?.isUpdate, undefined);
+
+    state.off("messages_updated", onUpdate);
+
     screen.destroy();
-    console.log("  ✓ ui geometry tests passed");
+    console.log("  ✓ ui geometry & chatView scroll tests passed");
 }
 
 // 5. Тесты работы с локальными путями (отправка файлов)
@@ -925,4 +983,144 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     console.log("  ✓ proxy parsing and network socket tests passed");
 }
 
+// ─── Тесты обработки изображений и генерации превью (image.js) ────────────────
+{
+    // 1. Тест rgbaToHex
+    assert.equal(rgbaToHex(255, 0, 128), "#ff0080");
+    assert.equal(rgbaToHex(0, 5, 10), "#00050a");
+    assert.equal(rgbaToHex(255, 255, 255), "#ffffff");
+
+    // 2. Тест calculateTargetDimensions
+    // Горизонтальное изображение 800x600 (4:3) при maxWidth=36, maxHeight=14 (maxPixelH=28)
+    const horiz = calculateTargetDimensions(800, 600, 36, 14);
+    assert.equal(horiz.dstW, 36);
+    assert.equal(horiz.dstH, 28);
+    assert.equal(horiz.rows, 14);
+
+    // Вертикальное изображение 600x800 (3:4)
+    const vert = calculateTargetDimensions(600, 800, 36, 14);
+    assert.ok(vert.dstW <= 36);
+    assert.equal(vert.dstH, 28);
+    assert.equal(vert.rows, 14);
+    assert.equal(vert.dstW, 21);
+
+    // Квадратное изображение 100x100 (1:1)
+    const square = calculateTargetDimensions(100, 100, 36, 14);
+    assert.equal(square.dstH, 28);
+    assert.equal(square.dstW, 28);
+    assert.equal(square.rows, 14);
+
+    // Четность высоты для корректных пар полублоков
+    assert.equal(horiz.dstH % 2, 0);
+    assert.equal(vert.dstH % 2, 0);
+    assert.equal(square.dstH % 2, 0);
+
+    // 3. Тест resizeRgba (билинейная интерполяция)
+    // Создаем 2x2 градиент RGBA:
+    // [Красный, Зеленый]
+    // [Синий,   Белый  ]
+    const src2x2 = new Uint8Array([
+        255, 0, 0, 255,     0, 255, 0, 255,
+        0, 0, 255, 255,     255, 255, 255, 255
+    ]);
+    const resized4x4 = resizeRgba(src2x2, 2, 2, 4, 4);
+    assert.equal(resized4x4.length, 4 * 4 * 4);
+    // Проверка, что альфа-канал сохранился
+    for (let i = 3; i < resized4x4.length; i += 4) {
+        assert.equal(resized4x4[i], 255);
+    }
+
+    // 4. Тест rgbaToHalfBlockBlessed
+    // 2x2 пикселя -> 2 колонки x 1 строка терминала
+    const halfBlockBlessed = rgbaToHalfBlockBlessed(src2x2, 2, 2);
+    assert.ok(halfBlockBlessed.includes("▀"), "должен содержать символ полублока ▀");
+    assert.ok(halfBlockBlessed.includes("-fg"), "должен содержать тег цвета текста");
+    assert.ok(halfBlockBlessed.includes("-bg"), "должен содержать тег цвета фона");
+    assert.ok(halfBlockBlessed.endsWith("{/}"), "должен сбрасывать стили в конце строки");
+    assert.equal(halfBlockBlessed.split("\n").length, 1, "2 пикселя по вертикали должны давать 1 строку терминала");
+
+    // 5. Тест strippedPhotoToJpg
+    const syntheticStripped = Buffer.concat([
+        Buffer.from([1, 20, 30]), // version 1, height 20, width 30
+        Buffer.from([0xaa, 0xbb, 0xcc])
+    ]);
+    const unpackedJpg = strippedPhotoToJpg(syntheticStripped);
+    assert.ok(unpackedJpg.length > 200, "распакованный JPEG должен содержать таблицы квантования и заголовок");
+    assert.equal(unpackedJpg[0], 0xff);
+    assert.equal(unpackedJpg[1], 0xd8); // JPEG SOI
+    assert.equal(unpackedJpg[164], 20, "высота должна быть записана в байт 164");
+    assert.equal(unpackedJpg[166], 30, "ширина должна быть записана в байт 166");
+    assert.equal(unpackedJpg[unpackedJpg.length - 2], 0xff);
+    assert.equal(unpackedJpg[unpackedJpg.length - 1], 0xd9); // JPEG EOI
+
+    // Некорректный буфер возвращается без падений
+    assert.deepEqual(strippedPhotoToJpg(Buffer.from([2, 20, 30])), Buffer.from([2, 20, 30]));
+
+    // 6. Тесты decodeImageBuffer и renderImageBuffer для JPEG и PNG
+    // Кодируем валидный тестовый JPEG
+    const testJpg = jpegJs.encode({
+        data: Buffer.from(src2x2),
+        width: 2,
+        height: 2
+    }, 100).data;
+
+    const decodedJpg = decodeImageBuffer(testJpg);
+    assert.equal(decodedJpg.width, 2);
+    assert.equal(decodedJpg.height, 2);
+    assert.equal(decodedJpg.data.length, 16);
+
+    const renderedJpg = renderImageBuffer(testJpg, { maxWidth: 10, maxHeight: 5 });
+    assert.ok(renderedJpg.length > 0);
+    assert.ok(renderedJpg.includes("▀"));
+
+    // Кодируем валидный тестовый PNG
+    const pngObj = new PNG({ width: 2, height: 2 });
+    pngObj.data = Buffer.from(src2x2);
+    const testPng = PNG.sync.write(pngObj);
+
+    const decodedPng = decodeImageBuffer(testPng);
+    assert.equal(decodedPng.width, 2);
+    assert.equal(decodedPng.height, 2);
+
+    const renderedPng = renderImageBuffer(testPng, { maxWidth: 10, maxHeight: 5, cacheKey: "test_png_cache" });
+    assert.ok(renderedPng.length > 0);
+    assert.ok(renderedPng.includes("▀"));
+
+    // Проверка кэширования
+    assert.ok(imagePreviewCache.has("test_png_cache"));
+    assert.equal(renderImageBuffer(testPng, { cacheKey: "test_png_cache" }), renderedPng);
+
+    // 7. Тест интеграции с normalizeMessage
+    const msgWithPhoto = {
+        id: 42,
+        date: 1700000000,
+        out: false,
+        message: "Смотри фото!",
+        media: {
+            className: "MessageMediaPhoto",
+            photo: {
+                id: 12345n,
+                sizes: [
+                    {
+                        className: "PhotoStrippedSize",
+                        type: "i",
+                        bytes: Buffer.concat([Buffer.from([1, 2, 2]), testJpg.subarray(20, testJpg.length - 2)])
+                    }
+                ]
+            }
+        }
+    };
+    const norm = normalizeMessage(msgWithPhoto);
+    assert.equal(norm.id, 42);
+    assert.ok(norm.imagePreview !== undefined);
+    assert.ok(norm.mediaDescription.includes("Фотография"));
+
+    // 8. Защита от поврежденных буферов
+    assert.equal(renderImageBuffer(Buffer.from([0, 1, 2, 3])), "");
+    assert.equal(renderStrippedThumbnail(Buffer.from([])), "");
+
+    console.log("  ✓ image.js & preview rendering tests passed");
+}
+
 console.log("\n\u2705 Все юнит-тесты TuiGram успешно пройдены!\n");
+

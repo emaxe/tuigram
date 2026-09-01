@@ -1,6 +1,8 @@
 import { Api, errors } from "teleproto";
 import { idToString, toMarkedId, getEntityDisplayName, entityCache, resolveEntity } from "./entities.js";
 import { describeMedia } from "./formatter.js";
+import { config } from "../config.js";
+import { renderStrippedThumbnail, renderImageBuffer } from "../utils/image.js";
 
 const { FloodWaitError } = errors;
 
@@ -38,6 +40,27 @@ export function normalizeMessage(message) {
         }
     }
 
+    // Извлечение и рендеринг PhotoStrippedSize в псевдографику
+    let imagePreview = null;
+    if (config.showImages && message.media) {
+        const media = message.media;
+        const photo = media.photo;
+        const doc = media.document;
+        const sizes = photo?.sizes || doc?.thumbs || [];
+        const stripped = sizes.find((s) => s?.className === "PhotoStrippedSize" || s?.type === "i" || (s?.bytes && s.bytes.length > 0));
+
+        if (stripped?.bytes) {
+            const cacheKey = photo?.id
+                ? `photo_${photo.id}`
+                : (doc?.id ? `doc_${doc.id}` : `msg_${message.id}`);
+            imagePreview = renderStrippedThumbnail(stripped.bytes, {
+                maxWidth: config.imageMaxWidth,
+                maxHeight: config.imageMaxHeight,
+                cacheKey,
+            }) || null;
+        }
+    }
+
     return {
         id: message.id,
         date: message.date ? message.date * 1000 : Date.now(),
@@ -53,6 +76,7 @@ export function normalizeMessage(message) {
         forwards: message.forwards || null,
         media: message.media || null,
         mediaDescription: describeMedia(message.media),
+        imagePreview,
         entities: message.entities || [],
         reactions,
         rawMessage: message,
@@ -263,3 +287,37 @@ export async function markAsRead(client, rawPeer, maxId = 0) {
         // Игнорируем незначительные сетевые ошибки прочтения
     }
 }
+
+/**
+ * Асинхронно загружает и декодирует превью изображения сообщения через MTProto.
+ * @param {import("teleproto").TelegramClient} client
+ * @param {object} rawMessage
+ * @param {object} [options]
+ * @param {number} [options.maxWidth]
+ * @param {number} [options.maxHeight]
+ * @returns {Promise<string>}
+ */
+export async function loadMessageImagePreview(client, rawMessage, { maxWidth = config.imageMaxWidth, maxHeight = config.imageMaxHeight } = {}) {
+    if (!rawMessage?.media) return "";
+    const media = rawMessage.media;
+    const isPhoto = media.className === "MessageMediaPhoto";
+    const isDoc = media.className === "MessageMediaDocument";
+    if (!isPhoto && !isDoc) return "";
+
+    const cacheKey = isPhoto
+        ? `photo_full_${media.photo?.id || rawMessage.id}`
+        : `doc_full_${media.document?.id || rawMessage.id}`;
+
+    try {
+        const thumbBuf = await client.downloadMedia(media, { thumb: 1 });
+        if (!thumbBuf || thumbBuf.length === 0) return "";
+        return renderImageBuffer(thumbBuf, {
+            maxWidth,
+            maxHeight,
+            cacheKey,
+        });
+    } catch {
+        return "";
+    }
+}
+

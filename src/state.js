@@ -140,7 +140,7 @@ class AppState extends EventEmitter {
         combined.sort((a, b) => (a.date || 0) - (b.date || 0) || (a.id - b.id));
 
         this.messagesByChat.set(chatId, combined);
-        this.emit("messages_updated", { chatId, messages: combined, isPrepend: prepend });
+        this.emit("messages_updated", { chatId, messages: combined, isPrepend: prepend, isUpdate: false });
     }
 
     /**
@@ -181,7 +181,7 @@ class AppState extends EventEmitter {
             this.emit("dialogs_updated", this.getVisibleDialogs());
         }
 
-        this.emit("messages_updated", { chatId, messages: list, isPrepend: false });
+        this.emit("messages_updated", { chatId, messages: list, isPrepend: false, isNewMessage: true });
     }
 
     /**
@@ -194,7 +194,7 @@ class AppState extends EventEmitter {
         const index = list.findIndex((m) => m.id === updatedMessage.id);
         if (index !== -1) {
             list[index] = { ...list[index], ...updatedMessage };
-            this.emit("messages_updated", { chatId, messages: list, isPrepend: false });
+            this.emit("messages_updated", { chatId, messages: list, isPrepend: false, isUpdate: true });
         }
     }
 
@@ -208,7 +208,7 @@ class AppState extends EventEmitter {
         const idSet = new Set(deletedIds);
         const filtered = list.filter((m) => !idSet.has(m.id));
         this.messagesByChat.set(chatId, filtered);
-        this.emit("messages_updated", { chatId, messages: filtered, isPrepend: false });
+        this.emit("messages_updated", { chatId, messages: filtered, isPrepend: false, isUpdate: true });
     }
 
     /**

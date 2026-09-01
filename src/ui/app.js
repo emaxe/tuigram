@@ -16,7 +16,7 @@ import { state } from "../state.js";
 import { config } from "../config.js";
 import { fetchDialogs } from "../telegram/dialogs.js";
 import { setMessagePalette } from "../telegram/formatter.js";
-import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead } from "../telegram/messages.js";
+import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead, loadMessageImagePreview } from "../telegram/messages.js";
 import { startTelegramListener } from "../telegram/listener.js";
 import { logout } from "../telegram/auth.js";
 import { ensureDir, inspectLocalFile } from "../utils/storage.js";
@@ -128,6 +128,7 @@ export async function startTui(client, me) {
                 state.setMessages(dialog.id, history.messages);
                 markAsRead(client, dialog.peerId).catch(() => {});
                 statusBar.showMessage(`Чат: ${dialog.title}`, "info");
+                fetchMissingImagePreviews(history.messages, dialog.id);
             } catch (err) {
                 statusBar.showMessage(`Ошибка загрузки: ${err.message}`, "error");
             }
@@ -157,6 +158,7 @@ export async function startTui(client, me) {
                 if (older.messages.length > 0) {
                     state.setMessages(state.activeChat.id, older.messages, true);
                     statusBar.showMessage(`Загружено ${older.messages.length} предыдущих сообщений`, "info");
+                    fetchMissingImagePreviews(older.messages, state.activeChat.id);
                 }
             } catch (err) {
                 statusBar.showMessage(`Ошибка пагинации: ${err.message}`, "error");
@@ -291,9 +293,13 @@ export async function startTui(client, me) {
         chatView.setMessages(msgs);
     });
 
-    state.on("messages_updated", ({ chatId, messages, isPrepend }) => {
+    state.on("messages_updated", ({ chatId, messages, isPrepend, isUpdate, isNewMessage }) => {
         if (state.activeChat?.id === chatId) {
-            chatView.setMessages(messages, !isPrepend);
+            // Скроллим в самый низ только если это новое сообщение или первая загрузка чата.
+            // При подгрузке старых сообщений (isPrepend) или фоновых обновлениях (isUpdate)
+            // позиция скролла сохраняется!
+            const shouldScrollToBottom = isNewMessage ? config.autoScroll : (!isPrepend && !isUpdate);
+            chatView.setMessages(messages, shouldScrollToBottom);
         }
     });
 
@@ -316,11 +322,41 @@ export async function startTui(client, me) {
         }
     });
 
+    /**
+     * Фоново догружает превью изображений для сообщений, не имевших встроенного PhotoStrippedSize.
+     * @param {Array<object>} messages
+     * @param {string} chatId
+     */
+    async function fetchMissingImagePreviews(messages, chatId) {
+        if (!config.showImages || !messages || messages.length === 0) return;
+        for (const msg of messages) {
+            if (state.activeChat?.id !== chatId) break;
+            if (msg.media && !msg.imagePreview && msg.rawMessage) {
+                const isPhoto = msg.media.className === "MessageMediaPhoto";
+                const isDoc = msg.media.className === "MessageMediaDocument";
+                if (isPhoto || isDoc) {
+                    try {
+                        const preview = await loadMessageImagePreview(client, msg.rawMessage);
+                        if (preview && state.activeChat?.id === chatId) {
+                            msg.imagePreview = preview;
+                            state.updateMessage(chatId, msg);
+                        }
+                    } catch {
+                        // Игнорируем сетевые ошибки фоновой загрузки превью
+                    }
+                }
+            }
+        }
+    }
+
     // 6. Подключение фонового слушателя MTProto событий
     listener = startTelegramListener(client);
 
     listener.on("new_message", ({ peerId, message }) => {
         state.addMessage(peerId, message);
+        if (!message.imagePreview && (message.media?.className === "MessageMediaPhoto" || message.media?.className === "MessageMediaDocument")) {
+            fetchMissingImagePreviews([message], peerId);
+        }
 
         if (state.activeChat?.id === peerId) {
             markAsRead(client, state.activeChat.peerId).catch(() => {});
@@ -464,6 +500,21 @@ export async function startTui(client, me) {
 
     screen.key(["tab"], () => moveFocus(1));
     screen.key(["S-tab"], () => moveFocus(-1));
+
+    screen.key(["pageup", "C-u"], () => {
+        if (!state.activeChat) return;
+        chatView.scrollBox.scroll(-10);
+        if (chatView.scrollBox.getScroll() <= 0) {
+            chatView.loadMore?.();
+        }
+        screen.render();
+    });
+
+    screen.key(["pagedown", "C-d"], () => {
+        if (!state.activeChat) return;
+        chatView.scrollBox.scroll(10);
+        screen.render();
+    });
 
     screen.key(["f1", "?"], () => {
         releaseInputs();
