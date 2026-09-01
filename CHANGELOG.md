@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Planned
+
+- English localization of the TUI and CLI interface strings.
+
+## [1.3.0] — 2026-09-01
+
 ### Added
 
 - Comprehensive mouse support across the entire TUI:
@@ -21,11 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Interactive header elements: click logo for Help, click chat title for Chat Info, click status badge for network state.
   - Interactive context bar in input box: click to cancel reply/edit mode or trigger shortcuts.
   - Full mouse navigation inside modals (button clicks, checkbox toggles, file browsing) and dismissing any modal by clicking outside its boundary.
+- Robust terminal mouse mode initialization (`\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1015h`) supporting modern terminals (macOS Terminal.app, iTerm2, Alacritty, Kitty, Windows Terminal, xterm).
 - Pure mouse coordinate calculation utilities (`src/utils/mouse.js`) with full test coverage in `test/unit.test.js`.
-
-### Planned
-
-- English localization of the TUI and CLI interface strings.
 
 ## [1.2.0] — 2026-09-01
 
@@ -132,7 +135,8 @@ First public release.
 - A WCAG contrast test (3:1 threshold) applied to every theme **after** conversion
   to xterm-256 — the colors are checked exactly as the user sees them.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/emaxe/tuigram/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/emaxe/tuigram/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/emaxe/tuigram/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/emaxe/tuigram/compare/v1.0.0...v1.0.1
