@@ -294,8 +294,11 @@ export function rgbaToHalfBlockBlessed(data, width, height) {
  * @returns {string}
  */
 export function renderImageBuffer(buffer, { mimeType = "", maxWidth = 36, maxHeight = 14, cacheKey } = {}) {
-    if (cacheKey && imagePreviewCache.has(cacheKey)) {
-        return imagePreviewCache.get(cacheKey);
+    // Размер входит в ключ: одно и то же фото рисуется и миниатюрой в ленте, и на весь
+    // экран в просмотрщике. Без размера полноэкранный рендер подменял бы превью в ленте.
+    const key = cacheKey ? `${cacheKey}@${maxWidth}x${maxHeight}` : null;
+    if (key && imagePreviewCache.has(key)) {
+        return imagePreviewCache.get(key);
     }
 
     try {
@@ -304,12 +307,12 @@ export function renderImageBuffer(buffer, { mimeType = "", maxWidth = 36, maxHei
         const resized = resizeRgba(decoded.data, decoded.width, decoded.height, dstW, dstH);
         const blessedText = rgbaToHalfBlockBlessed(resized, dstW, dstH);
 
-        if (cacheKey) {
+        if (key) {
             if (imagePreviewCache.size >= MAX_CACHE_SIZE) {
                 const firstKey = imagePreviewCache.keys().next().value;
                 imagePreviewCache.delete(firstKey);
             }
-            imagePreviewCache.set(cacheKey, blessedText);
+            imagePreviewCache.set(key, blessedText);
         }
 
         return blessedText;
@@ -330,10 +333,7 @@ export function renderImageBuffer(buffer, { mimeType = "", maxWidth = 36, maxHei
 export function renderStrippedThumbnail(strippedBytes, { maxWidth = 36, maxHeight = 14, cacheKey } = {}) {
     if (!strippedBytes || strippedBytes.length < 3) return "";
 
-    if (cacheKey && imagePreviewCache.has(cacheKey)) {
-        return imagePreviewCache.get(cacheKey);
-    }
-
+    // Кэш проверяет renderImageBuffer: только он знает итоговый ключ с размером
     try {
         const jpgBuf = strippedPhotoToJpg(strippedBytes);
         return renderImageBuffer(jpgBuf, { mimeType: "image/jpeg", maxWidth, maxHeight, cacheKey });

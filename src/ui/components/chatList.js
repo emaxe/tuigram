@@ -4,7 +4,7 @@ import { escapeBlessed } from "../../telegram/formatter.js";
 import { fg, badge } from "../theme.js";
 import unicode from "neo-blessed/lib/unicode.js";
 
-import { getTabByCoordinate } from "../../utils/mouse.js";
+import { getTabByCoordinate, isRightClick } from "../../utils/mouse.js";
 
 /**
  * Создаёт компонент списка диалогов (левая панель).
@@ -70,6 +70,7 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
     }
 
     tabsBox.on("click", (data) => {
+        if (isRightClick(data)) return;
         const relX = data.x - (tabsBox.aleft || 0);
         const tabKey = getTabByCoordinate(relX, TAB_KEYS, TAB_NAMES);
         if (tabKey) {
@@ -148,7 +149,8 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
     list.createItem = (content) => {
         const item = baseCreateItem(content);
         item.wrap = false;
-        item.on("click", () => {
+        item.on("click", (data) => {
+            if (isRightClick(data)) return;
             const index = list.getItemIndex(item);
             if (index !== -1 && currentDialogs[index]) {
                 list.select(index);

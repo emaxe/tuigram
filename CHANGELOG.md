@@ -13,6 +13,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - English localization of the TUI and CLI interface strings.
 
+## [1.4.0] — 2026-09-01
+
+### Added
+
+- Message selection in the chat feed: a left click marks a message with a colored `▌` bar
+  along all of its lines. `↑` / `↓` (and `k` / `j`) move the selection between messages and
+  scroll it into view; reaching the topmost message loads the previous page of history.
+- The message action menu now opens with the right mouse button, and with `[Enter]` on the
+  selected message. Previously any click opened it, so a message could not simply be picked.
+- The selected message became the target for actions: `[Ctrl+R]` replies to it, `[Ctrl+E]`
+  edits it (when it is yours), `[Ctrl+A]` and the status bar `[Ctrl+A]` button open the menu
+  for it. With nothing selected the previous behaviour applies — the last message in the chat.
+- Full-screen image viewer opened by clicking an image preview: the thumbnail that arrived
+  with the message is shown instantly, then replaced by the full-size version. For videos and
+  documents the largest thumbnail is used and the file itself is never downloaded. Close with
+  `[Esc]`, `[Q]`, `[Enter]` or a click; the image is re-rendered when the terminal is resized.
+- The `[Ctrl+A]` shortcut (action menu) now works from every panel, including the input box.
+- `[F12]` temporarily hands the mouse back to the terminal so text can be selected and
+  copied, and restores the capture when pressed again.
+
+### Fixed
+
+- A modal window was closed by the very click that opened it: blessed delivers a click to the
+  element first and to the screen immediately after. As a result the status bar buttons
+  `[F1]`, `[Ctrl+A]`, `[Ctrl+P]`, `[Ctrl+Q]`, the header logo and the chat title did not work
+  with the mouse at all, and the action menu only stayed open when the click happened to land
+  inside the future modal rectangle.
+- Clicking a message hit the wrong message in a scrolled feed: the position was read from
+  `getScroll()`, which adds a blessed-internal offset to the actual content shift.
+- The mouse wheel scrolled the feed twice per notch (a custom handler on top of the built-in
+  blessed one), and scrolling up from the bottom of the feed did nothing for the first notches.
+- `PageUp` / `PageDown` scrolled the feed twice as far while it had focus.
+- Clicks on the input hints were off by about 10 cells: clicking `[Ctrl+E] Правка` triggered
+  commands, and clicking the "Введите сообщение…" text switched to reply mode.
+- A right click behaved like a left one: it opened chats in the list and pressed status bar
+  buttons and filter tabs.
+- The feed layout map drifted by one line per message, so click coordinates diverged from the
+  actual text the longer the history grew.
+- A full-screen image render could evict and replace the same image's thumbnail in the feed:
+  the render size is now part of the pseudo-graphics cache key.
+
 ## [1.3.0] — 2026-09-01
 
 ### Added
@@ -135,7 +176,8 @@ First public release.
 - A WCAG contrast test (3:1 threshold) applied to every theme **after** conversion
   to xterm-256 — the colors are checked exactly as the user sees them.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/emaxe/tuigram/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/emaxe/tuigram/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/emaxe/tuigram/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/emaxe/tuigram/compare/v1.0.1...v1.1.0

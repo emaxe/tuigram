@@ -71,7 +71,8 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
 
 - **A complete interactive TUI**:
   - Two-pane adaptive layout (dialog list on the left, history and input box on the right);
-  - Keyboard and mouse control (clicks, wheel scrolling);
+  - Keyboard and mouse control (left click selects a message, right click opens the action
+    menu, clicking an image opens it full screen, wheel scrolling);
   - Chat categories: All, Direct messages, Groups, Channels, Bots, Unread;
   - Instant search and filtering of chats by title and `@username` (`/`);
   - Live typing indicator ("… is typing");
@@ -433,22 +434,26 @@ node scripts/check-package.js   # verifies that .env and the session do not leak
 |---|---|---|
 | `Tab` / `Shift+Tab` | Global | Cycle focus: dialog list → message feed → input box |
 | `↑` / `↓` | Dialog list | Select a chat |
+| `↑` / `↓`, `k` / `j` | Message feed | Move the selection between messages |
 | `Enter` | Dialog list | Open the selected chat and load its history |
+| `Enter` | Message feed | Action menu for the selected message |
 | `1` .. `6` | Dialog list | Switch category: `1:All`, `2:DM`, `3:Groups`, `4:Channels`, `5:Bots`, `6:Unread` |
 | `/` | Dialog list | Search / filter chats |
 | `Enter` | Input box | Send the typed message |
 | `Ctrl+J` | Input box | Insert a line break without sending |
-| `Ctrl+R` | Chat / Input | Reply to the last message |
-| `Ctrl+E` | Chat / Input | Edit your own last message |
-| `Ctrl+A` | Messages | Context action menu (reactions, delete, download, reply) |
+| `Ctrl+R` | Chat / Input | Reply to the selected message, or the last one |
+| `Ctrl+E` | Chat / Input | Edit the selected message of yours, or your last one |
+| `Ctrl+A` | Global | Context action menu (reactions, delete, download, reply) |
 | `Ctrl+O` | Global | Send a file / photo / document |
 | `Ctrl+F` | Send dialog | File browser (navigate folders) |
 | `Ctrl+D` | Send dialog | Send uncompressed, as a document |
 | `Ctrl+P` | Global | Info about the current chat (ID, members, links) |
 | `PageUp` / `Ctrl+U` | History | Scroll up / load older history |
 | `PageDown` / `Ctrl+D` | History | Scroll down |
+| `Home` / `End` | History | Jump to the top (loads history) / to the last message |
 | `Esc` | Modals | Close the modal / cancel reply or edit |
 | `F1` or `?` | Global | Help window with every shortcut |
+| `F12` | Global | Hand the mouse to the terminal for text selection (press again to return) |
 | `Ctrl+Q` / `Ctrl+C` | Global | Safely exit the client |
 
 ---
@@ -459,19 +464,50 @@ TuiGram fully supports mouse interaction in terminals that support mouse reporti
 
 | Action | Target | Result |
 |---|---|---|
-| Click | Left / Middle / Bottom panel | Focus the clicked panel |
-| Click | Chat item in dialog list | Immediately select and open the chat |
-| Click | Filter tabs `1:Все` .. `6:Непроч` | Switch chat category filter |
-| Click | Search bar `[/]` | Focus search box and clear placeholder |
+| Left click | Left / Middle / Bottom panel | Focus the clicked panel |
+| Left click | Chat item in dialog list | Immediately select and open the chat |
+| Left click | Filter tabs `1:Все` .. `6:Непроч` | Switch chat category filter |
+| Left click | Search bar `[/]` | Focus search box and clear placeholder |
 | Wheel scroll | Dialog list / Message feed | Smooth scroll (scrolling up to the top loads older messages) |
-| Click | Any message line | Open message action menu (reactions, reply, edit, download, delete) |
-| Click | Header logo 🚀 | Open Help window |
-| Click | Header active chat title | Open Chat Info window |
-| Click | Header connection badge | Show active network status |
-| Click | Input context bar | Cancel reply/edit mode or insert `/` |
-| Click | Status bar items | Trigger corresponding action (`[Tab]`, `[F1]`, `[Ctrl+A]`, `[Ctrl+Q]`, etc.) |
+| **Left click** | **Message in the feed** | **Select the message — a `▌` bar marks it on the left** |
+| **Right click** | **Message in the feed** | **Open the action menu (reactions, reply, edit, download, delete)** |
+| **Left click** | **Image preview inside a message** | **Open the image full screen** |
+| Left click | Empty area of the feed | Focus the message feed |
+| Left click | Header logo 🚀 | Open Help window |
+| Left click | Header active chat title | Open Chat Info window |
+| Left click | Header connection badge | Show active network status |
+| Left click | Input context bar | Cancel reply/edit mode, trigger `[Ctrl+R]` / `[Ctrl+E]` or insert `/` |
+| Left click | Status bar items | Trigger corresponding action (`[Tab]`, `[F1]`, `[Ctrl+A]`, `[Ctrl+Q]`, etc.) |
 | Click | Outside any modal window | Dismiss / close modal |
 | Click | Buttons in modals | Click buttons (`[ Отправить ]`, `[ Отмена ]`, `[ Закрыть ]`, toggle checkboxes) |
+
+### Message selection
+
+A left click selects a message: a colored `▌` bar appears to the left of all its lines.
+`↑` / `↓` (and `k` / `j`) move the selection between messages and scroll it into view;
+reaching the topmost message loads the previous page of history. Plain scrolling stays on
+`PageUp` / `PageDown`, the wheel and `Home` / `End`.
+
+The selected message becomes the target for actions: `[Enter]` and right click open the
+action menu, `[Ctrl+R]` replies to it, `[Ctrl+E]` edits it (when it is yours). With nothing
+selected these actions apply to the last message in the chat, as before.
+
+### Full-screen image viewer
+
+A left click on a preview opens the image across the whole terminal. The thumbnail that
+already arrived with the message is shown instantly, then it is replaced by the full-size
+version as soon as it downloads. For videos and documents the largest available thumbnail
+is shown — the file itself is never downloaded. Close with `[Esc]`, `[Q]`, `[Enter]` or a
+click anywhere.
+
+### Right click and terminal text selection
+
+> **macOS Terminal.app** captures the right click for its own context menu and never passes
+> it to the application. Use `[Enter]` or `[Ctrl+A]` on the selected message there. Right
+> click works in iTerm2, Ghostty, Alacritty, Kitty and Windows Terminal.
+
+While the app captures the mouse, the terminal cannot select text for copying. Press `[F12]`
+to hand the mouse back to the terminal, and `[F12]` again to return control to the interface.
 
 ---
 

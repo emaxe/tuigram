@@ -1,6 +1,6 @@
 import blessed from "neo-blessed";
 import { fg } from "../../theme.js";
-import { isInsideBox } from "../../../utils/mouse.js";
+import { bindOutsideClickClose } from "../../modalMouse.js";
 
 /**
  * Создаёт модальное окно подтверждения действия (Да / Нет).
@@ -130,18 +130,7 @@ export function createConfirmModal(screen, theme) {
     }
 
     // Закрытие при клике мышью мимо модального окна
-    screen.on("click", (data) => {
-        if (!modal.visible) return;
-        const inside = isInsideBox(data.x, data.y, {
-            left: modal.aleft,
-            top: modal.atop,
-            width: modal.width,
-            height: modal.height,
-        });
-        if (!inside) {
-            hide();
-        }
-    });
+    const armOutsideClose = bindOutsideClickClose(screen, modal, hide);
 
     return {
         modal,
@@ -149,6 +138,7 @@ export function createConfirmModal(screen, theme) {
             currentCallback = onConfirm;
             previousFocus = screen.focused;
             msgBox.setContent(`{bold}${text}{/bold}`);
+            armOutsideClose();
             modal.show();
             modal.setFront();
             noBtn.focus();

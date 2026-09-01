@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { formatFileSize } from "../../../utils/time.js";
 import { fg } from "../../theme.js";
-import { isInsideBox } from "../../../utils/mouse.js";
+import { bindOutsideClickClose } from "../../modalMouse.js";
 
 /**
  * Модальное окно выбора локального файла (обёртка над blessed.filemanager).
@@ -194,18 +194,7 @@ export function createFilePickerModal(screen, theme) {
     footer.on("click", hide);
 
     // Закрытие при клике мышью мимо модального окна
-    screen.on("click", (data) => {
-        if (!modal.visible) return;
-        const inside = isInsideBox(data.x, data.y, {
-            left: modal.aleft,
-            top: modal.atop,
-            width: modal.width,
-            height: modal.height,
-        });
-        if (!inside) {
-            hide();
-        }
-    });
+    const armOutsideClose = bindOutsideClickClose(screen, modal, hide);
 
     return {
         modal,
@@ -219,6 +208,7 @@ export function createFilePickerModal(screen, theme) {
             onPickCallback = onPick;
             onCloseCallback = onClose;
             const cwd = startDir && fs.existsSync(startDir) ? startDir : os.homedir();
+            armOutsideClose();
             modal.show();
             modal.setFront();
             manager.refresh(cwd, () => {

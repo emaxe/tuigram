@@ -4,7 +4,7 @@ import { inspectLocalFile } from "../../../utils/storage.js";
 import { formatFileSize } from "../../../utils/time.js";
 import { createFilePickerModal } from "./filePickerModal.js";
 import { fg } from "../../theme.js";
-import { isInsideBox } from "../../../utils/mouse.js";
+import { bindOutsideClickClose } from "../../modalMouse.js";
 
 /** Разделитель нескольких путей в поле ввода. */
 const PATH_SEPARATOR = "|";
@@ -253,6 +253,7 @@ export function createFileModal(screen, theme, { onSendFile } = {}) {
         asDocumentCheck.uncheck();
         statusLine.setContent("");
         previousFocus = screen.focused;
+        armOutsideClose();
         modal.show();
         modal.setFront();
         pathInput.focus();
@@ -360,18 +361,10 @@ export function createFileModal(screen, theme, { onSendFile } = {}) {
         screen.render();
     });
 
-    // Закрытие при клике мышью мимо модального окна
-    screen.on("click", (data) => {
-        if (!modal.visible || picker.modal.visible) return;
-        const inside = isInsideBox(data.x, data.y, {
-            left: modal.aleft,
-            top: modal.atop,
-            width: modal.width,
-            height: modal.height,
-        });
-        if (!inside) {
-            hide();
-        }
+    // Закрытие при клике мышью мимо модального окна.
+    // Пока открыт файловый пикер, клики мимо окна отправки его не закрывают.
+    const armOutsideClose = bindOutsideClickClose(screen, modal, () => {
+        if (!picker.modal.visible) hide();
     });
 
     return {

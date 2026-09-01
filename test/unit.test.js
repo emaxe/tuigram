@@ -9,7 +9,7 @@ import { parseProxyConfig, formatProxyUrl } from "../src/config.js";
 import { createHttpConnectSocket, TuiGramNetSockets } from "../src/telegram/socket.js";
 import { assertInteractiveInput } from "../src/telegram/auth.js";
 import { strippedPhotoToJpg, decodeImageBuffer, calculateTargetDimensions, resizeRgba, rgbaToHex, rgbaToHalfBlockBlessed, renderImageBuffer, renderStrippedThumbnail, imagePreviewCache } from "../src/utils/image.js";
-import { stringCellWidth, isInsideBox, getTabByCoordinate, buildMessageLineRanges, getMessageAtLine, getStatusBarActionAt, getHeaderActionAt, getInputContextActionAt } from "../src/utils/mouse.js";
+import { stringCellWidth, isInsideBox, isRightClick, getTabByCoordinate, getMessageAtLine, getMessagePartAtPoint, getStatusBarActionAt, getHeaderActionAt, getInputContextActionAt } from "../src/utils/mouse.js";
 import { normalizeMessage } from "../src/telegram/messages.js";
 import jpegJs from "jpeg-js";
 import { PNG } from "pngjs";
@@ -169,21 +169,34 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     chatView.setMessages(testMsgs, true);
     assert.ok(chatView.scrollBox.getScrollHeight() > chatView.scrollBox.height);
 
-    // Прокрутка наверх вызывает onLoadMoreHistory при достижении верха
-    loadMoreTriggered = false;
-    chatView.scrollBox.scrollTo(0);
+    // Стрелка вверх двигает выделение: без выделения берётся последнее сообщение
     chatView.scrollBox.emit("key up");
-    assert.equal(loadMoreTriggered, true, "стрелка вверх на 0 строке должна вызывать onLoadMoreHistory");
+    assert.equal(chatView.getSelected()?.id, 30, "стрелка вверх без выделения выделяет последнее сообщение");
+    chatView.scrollBox.emit("key up");
+    assert.equal(chatView.getSelected()?.id, 29, "стрелка вверх поднимает выделение на сообщение выше");
 
+    // Достигнув первого сообщения, выделение подтягивает предыдущую страницу истории
     loadMoreTriggered = false;
+    chatView.setSelected(2);
+    chatView.scrollBox.emit("key up");
+    assert.equal(chatView.getSelected()?.id, 1);
+    assert.equal(loadMoreTriggered, true, "стрелка вверх на первом сообщении должна вызывать onLoadMoreHistory");
+
+    // Прокрутка колесом наверх тоже подгружает историю
+    loadMoreTriggered = false;
+    chatView.setSelected(null);
+    chatView.scrollBox.scrollTo(0);
     chatView.scrollBox.emit("wheelup");
     assert.equal(loadMoreTriggered, true, "wheelup на 0 строке должен вызывать onLoadMoreHistory");
 
-    // setMessages с autoScrollToBottom=false сохраняет позицию
+    // setMessages с autoScrollToBottom=false сохраняет позицию.
+    // Реальный сдвиг ленты — это childBase: getScroll() прибавляет к нему childOffset,
+    // который в blessed зависит от направления последней прокрутки.
     chatView.scrollBox.scrollTo(15);
-    const prevPos = chatView.scrollBox.getScroll();
+    const prevPos = chatView.scrollBox.childBase;
+    assert.equal(prevPos, 15);
     chatView.setMessages(testMsgs, false);
-    assert.equal(chatView.scrollBox.getScroll(), prevPos, "позиция скролла должна сохраняться при фоновом обновлении");
+    assert.equal(chatView.scrollBox.childBase, prevPos, "позиция скролла должна сохраняться при фоновом обновлении");
 
     // Тест флагов событий state
     const { state } = await import("../src/state.js");
@@ -1122,9 +1135,17 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     assert.ok(renderedPng.length > 0);
     assert.ok(renderedPng.includes("▀"));
 
-    // Проверка кэширования
-    assert.ok(imagePreviewCache.has("test_png_cache"));
-    assert.equal(renderImageBuffer(testPng, { cacheKey: "test_png_cache" }), renderedPng);
+    // Проверка кэширования: размер входит в ключ, иначе полноэкранный рендер
+    // вытеснял бы миниатюру той же картинки в ленте сообщений
+    assert.ok(imagePreviewCache.has("test_png_cache@10x5"));
+    assert.equal(
+        renderImageBuffer(testPng, { maxWidth: 10, maxHeight: 5, cacheKey: "test_png_cache" }),
+        renderedPng,
+        "повторный рендер того же размера должен браться из кэша"
+    );
+
+    renderImageBuffer(testPng, { maxWidth: 20, maxHeight: 10, cacheKey: "test_png_cache" });
+    assert.ok(imagePreviewCache.has("test_png_cache@20x10"), "другой размер должен кэшироваться отдельно");
 
     // 7. Тест интеграции с normalizeMessage
     const msgWithPhoto = {
@@ -1194,23 +1215,38 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     assert.equal(getTabByCoordinate(60), null);
     assert.equal(getTabByCoordinate(-1), null);
 
-    // 4. Тест buildMessageLineRanges и getMessageAtLine
-    const messages = [
-        { id: 1, text: "Первое сообщение", date: Date.now() },
-        { id: 2, text: "Второе сообщение\nВторая строка", date: Date.now(), replyToMsgId: 1 },
+    // 4. Тест getMessageAtLine и getMessagePartAtPoint
+    // Карту строк строит ChatView; здесь проверяется только поиск по готовой карте.
+    const ranges = [
+        { message: { id: 1 }, startLine: 0, endLine: 1, image: null },
+        {
+            message: { id: 2 },
+            startLine: 3,
+            endLine: 9,
+            image: { startLine: 5, endLine: 8, left: 2, right: 38 },
+        },
     ];
-    const ranges = buildMessageLineRanges(messages);
-    assert.equal(ranges.length, 2);
-    assert.equal(ranges[0].message.id, 1);
-    assert.equal(ranges[1].message.id, 2);
 
-    const msgAtFirst = getMessageAtLine(ranges[0].startLine, ranges);
-    assert.equal(msgAtFirst?.id, 1);
-    const msgAtSecond = getMessageAtLine(ranges[1].startLine, ranges);
-    assert.equal(msgAtSecond?.id, 2);
+    assert.equal(getMessageAtLine(0, ranges)?.id, 1);
+    assert.equal(getMessageAtLine(1, ranges)?.id, 1);
+    assert.equal(getMessageAtLine(2, ranges), null, "пустая строка между сообщениями");
+    assert.equal(getMessageAtLine(9, ranges)?.id, 2);
     assert.equal(getMessageAtLine(999, ranges), null);
     assert.equal(getMessageAtLine(-1, ranges), null);
-    assert.deepEqual(buildMessageLineRanges([]), []);
+    assert.equal(getMessageAtLine(0, []), null);
+
+    // Попадание в превью изображения и мимо него
+    assert.deepEqual(getMessagePartAtPoint(6, 10, ranges), { message: { id: 2 }, part: "image" });
+    assert.equal(getMessagePartAtPoint(6, 1, ranges)?.part, "body", "левее превью — тело сообщения");
+    assert.equal(getMessagePartAtPoint(6, 38, ranges)?.part, "body", "правее превью — тело сообщения");
+    assert.equal(getMessagePartAtPoint(4, 10, ranges)?.part, "body", "выше превью — тело сообщения");
+    assert.equal(getMessagePartAtPoint(0, 10, ranges)?.part, "body", "сообщение без картинки");
+    assert.equal(getMessagePartAtPoint(2, 10, ranges), null);
+
+    // Правая кнопка мыши
+    assert.equal(isRightClick({ button: "right" }), true);
+    assert.equal(isRightClick({ button: "left" }), false);
+    assert.equal(isRightClick(undefined), false);
 
     // 5. Тест getStatusBarActionAt
     assert.equal(getStatusBarActionAt(5, 120), "focus");
@@ -1234,9 +1270,19 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     // 7. Тест getInputContextActionAt
     assert.equal(getInputContextActionAt(10, "reply"), "cancel");
     assert.equal(getInputContextActionAt(10, "edit"), "cancel");
-    assert.equal(getInputContextActionAt(60, null), "reply");
-    assert.equal(getInputContextActionAt(80, null), "edit");
-    assert.equal(getInputContextActionAt(95, null), "commands");
+    // Границы совпадают с реально отрисованной строкой подсказок:
+    // " Введите сообщение...  " 0-22 · "[Enter] Отправить  " 23-41 ·
+    // "[Ctrl+J] Новая строка  " 42-64 · "[Ctrl+R] Ответ  " 65-80 ·
+    // "[Ctrl+E] Правка  " 81-97 · "[/] Команды" 98-108
+    assert.equal(getInputContextActionAt(10, null), null, "клик по подсказке ввода ничего не делает");
+    assert.equal(getInputContextActionAt(60, null), null, "клик по [Ctrl+J] ничего не делает");
+    assert.equal(getInputContextActionAt(65, null), "reply");
+    assert.equal(getInputContextActionAt(80, null), "reply");
+    assert.equal(getInputContextActionAt(81, null), "edit");
+    assert.equal(getInputContextActionAt(97, null), "edit");
+    assert.equal(getInputContextActionAt(98, null), "commands");
+    assert.equal(getInputContextActionAt(108, null), "commands");
+    assert.equal(getInputContextActionAt(200, null), null);
     assert.equal(getInputContextActionAt(-1, null), null);
 
     // 8. Интеграционные тесты мыши на компонентах UI
@@ -1311,17 +1357,62 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     firstItem.emit("click");
     assert.equal(selectedChat?.id, "10", "клик по элементу диалога должен вызывать onSelectDialog");
 
-    // Проверка клика по сообщению в ChatView
+    // Проверка кликов и выделения в ChatView
     let actionModalMsg = null;
+    let selectedMsg = null;
+    let openedImageMsg = null;
     const testChatView = createChatView(testScreen, testTheme, {
         onActionMenu: (msg) => { actionModalMsg = msg; },
+        onSelectMessage: (msg) => { selectedMsg = msg; },
+        onOpenImage: (msg) => { openedImageMsg = msg; },
     });
-    testChatView.setMessages([{ id: 123, text: "Clickable message", date: Date.now() }]);
+
+    // Превью — две строки псевдографики шириной 4 ячейки
+    const fakePreview = "{#112233-fg}▀▀▀▀{/}\n{#112233-fg}▀▀▀▀{/}";
+    const now = Date.now();
+    testChatView.setMessages([
+        { id: 123, text: "Clickable message", date: now },
+        { id: 124, text: "", date: now, mediaDescription: "[📷 Фотография]", imagePreview: fakePreview },
+    ]);
     testScreen.render();
+
     const atop = testChatView.scrollBox.atop || 0;
-    const scroll = testChatView.scrollBox.childBase || testChatView.scrollBox.getScroll() || 0;
-    testChatView.scrollBox.emit("click", { x: 50, y: atop - scroll + 3 });
-    assert.equal(actionModalMsg?.id, 123, "клик по сообщению в chatView должен открывать actionMenu");
+    const scroll = testChatView.scrollBox.childBase || 0;
+    /** Экранная координата Y для строки содержимого ленты. */
+    const lineY = (contentLine) => atop - scroll + contentLine;
+
+    // Строка 0 — разделитель даты (пустая), 1 — сама дата, 2 — пустая, 3 — автор первого сообщения
+    testChatView.scrollBox.emit("click", { x: 50, y: lineY(3), button: "left" });
+    assert.equal(selectedMsg?.id, 123, "левый клик по сообщению должен выделять его");
+    assert.equal(testChatView.getSelected()?.id, 123);
+    assert.equal(actionModalMsg, null, "левый клик не должен открывать меню действий");
+
+    testChatView.scrollBox.emit("click", { x: 50, y: lineY(3), button: "right" });
+    assert.equal(actionModalMsg?.id, 123, "правый клик должен открывать меню действий");
+
+    // Второе сообщение: строка 6 — автор, 7 — описание медиа, 8-9 — превью
+    const boxLeft = testChatView.scrollBox.aleft || 0;
+    testChatView.scrollBox.emit("click", { x: boxLeft + 3, y: lineY(8), button: "left" });
+    assert.equal(openedImageMsg?.id, 124, "клик по превью должен открывать просмотрщик");
+
+    openedImageMsg = null;
+    testChatView.scrollBox.emit("click", { x: boxLeft + 30, y: lineY(8), button: "left" });
+    assert.equal(openedImageMsg, null, "клик правее превью не открывает просмотрщик");
+    assert.equal(testChatView.getSelected()?.id, 124, "но выделяет сообщение");
+
+    // Перемещение выделения клавишами
+    testChatView.selectByOffset(-1);
+    assert.equal(testChatView.getSelected()?.id, 123, "selectByOffset(-1) поднимает выделение");
+    testChatView.selectByOffset(-1);
+    assert.equal(testChatView.getSelected()?.id, 123, "выделение не уходит выше первого сообщения");
+    testChatView.selectByOffset(1);
+    assert.equal(testChatView.getSelected()?.id, 124);
+
+    // Цель действий: выделенное сообщение, а без выделения — последнее в ленте
+    assert.equal(testChatView.getTargetMessage()?.id, 124);
+    testChatView.setSelected(null);
+    assert.equal(testChatView.getSelected(), null);
+    assert.equal(testChatView.getTargetMessage()?.id, 124, "без выделения действует последнее сообщение");
 
     // Проверка кликов в InputBox contextBar
     let cancelContextCalled = false;
@@ -1332,10 +1423,17 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     testInputBox.contextBar.emit("click", { x: 50, y: 35 });
     assert.equal(cancelContextCalled, true, "клик по contextBar в режиме ответа должен отменять контекст");
 
-    // Проверка закрытия ConfirmModal и ActionModal при клике вне окна
+    // Проверка закрытия модальных окон при клике вне окна.
+    // blessed шлёт клик экрану сразу после элемента, поэтому окно не должно
+    // закрываться тем же кликом, которым его открыли, — только следующим.
+    const nextTickClick = () => new Promise((resolve) => setImmediate(resolve));
+
     const testConfirm = createConfirmModal(testScreen, testTheme);
     testConfirm.ask("Confirm?", () => {});
     assert.equal(testConfirm.modal.visible, true);
+    testScreen.emit("click", { x: 0, y: 0 }); // клик, которым окно открыли
+    assert.equal(testConfirm.modal.visible, true, "открывающий клик не должен закрывать confirmModal");
+    await nextTickClick();
     testScreen.emit("click", { x: 0, y: 0 }); // клик в угол экрана мимо модалки
     assert.equal(testConfirm.modal.visible, false, "клик вне confirmModal должен закрывать окно");
 
@@ -1343,13 +1441,40 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     testAction.show({ id: 55, text: "Action item" });
     assert.equal(testAction.modal.visible, true);
     testScreen.emit("click", { x: 0, y: 0 });
+    assert.equal(testAction.modal.visible, true, "открывающий клик не должен закрывать actionModal");
+    await nextTickClick();
+    testScreen.emit("click", { x: 0, y: 0 });
     assert.equal(testAction.modal.visible, false, "клик вне actionModal должен закрывать окно");
 
     const testHelp = createHelpModal(testScreen, testTheme);
     testHelp.show();
     assert.equal(testHelp.modal.visible, true);
+    await nextTickClick();
     testScreen.emit("click", { x: 0, y: 0 });
     assert.equal(testHelp.modal.visible, false, "клик вне helpModal должен закрывать окно");
+
+    // Полноэкранный просмотрщик изображений
+    const { createImageViewerModal } = await import("../src/ui/components/modals/imageViewerModal.js");
+
+    let viewerLoadCalls = 0;
+    const testViewer = createImageViewerModal(testScreen, testTheme, {
+        onLoadFullImage: () => {
+            viewerLoadCalls++;
+            return Promise.reject(new Error("нет сети"));
+        },
+        onRenderPlaceholder: () => "{#112233-fg}▀▀▀▀{/}",
+    });
+
+    testViewer.show({ id: 321, rawMessage: {} });
+    assert.equal(testViewer.isVisible(), true, "просмотрщик должен открываться сразу, не дожидаясь сети");
+
+    // Загрузка идёт асинхронно, а отказ не должен ни ронять окно, ни закрывать его
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(viewerLoadCalls, 1, "просмотрщик должен запрашивать полное изображение");
+    assert.equal(testViewer.isVisible(), true, "ошибка загрузки не закрывает просмотрщик");
+
+    testViewer.hide();
+    assert.equal(testViewer.isVisible(), false, "просмотрщик должен закрываться");
 
     testScreen.destroy();
     console.log("  ✓ mouse support & mouse.js tests passed");

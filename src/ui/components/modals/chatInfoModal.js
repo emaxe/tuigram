@@ -3,7 +3,7 @@ import { escapeBlessed } from "../../../telegram/formatter.js";
 import { idToString } from "../../../telegram/entities.js";
 import { fg } from "../../theme.js";
 
-import { isInsideBox } from "../../../utils/mouse.js";
+import { bindOutsideClickClose } from "../../modalMouse.js";
 
 /**
  * Создаёт модальное окно информации о текущем чате.
@@ -111,6 +111,7 @@ export function createChatInfoModal(screen, theme) {
 
         infoText.setContent(body);
         previousFocus = screen.focused;
+        armOutsideClose();
         modal.show();
         modal.setFront();
         closeBtn.focus();
@@ -123,18 +124,7 @@ export function createChatInfoModal(screen, theme) {
     closeBtn.key(["escape", "q"], hide);
 
     // Закрытие при клике мышью мимо модального окна
-    screen.on("click", (data) => {
-        if (!modal.visible) return;
-        const inside = isInsideBox(data.x, data.y, {
-            left: modal.aleft,
-            top: modal.atop,
-            width: modal.width,
-            height: modal.height,
-        });
-        if (!inside) {
-            hide();
-        }
-    });
+    const armOutsideClose = bindOutsideClickClose(screen, modal, hide);
 
     return {
         modal,

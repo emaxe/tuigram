@@ -3,7 +3,10 @@ import { formatMessageTime, formatDateDivider } from "../../utils/time.js";
 import { formatMessageText, escapeBlessed } from "../../telegram/formatter.js";
 import { fg } from "../theme.js";
 
-import { getMessageAtLine } from "../../utils/mouse.js";
+import { getMessagePartAtPoint, isRightClick, stringCellWidth } from "../../utils/mouse.js";
+
+/** Отступ тела сообщения от левого края ленты, в ячейках. */
+const BODY_INDENT = 2;
 
 /**
  * Создаёт компонент просмотра сообщений чата (правая центральная панель).
@@ -11,9 +14,18 @@ import { getMessageAtLine } from "../../utils/mouse.js";
  * @param {object} theme
  * @param {object} callbacks
  * @param {() => void} [callbacks.onLoadMoreHistory]
- * @param {(msg: object) => void} [callbacks.onActionMenu]
+ * @param {(msg: object) => void} [callbacks.onActionMenu] правый клик / Enter / Ctrl+A
+ * @param {(msg: object) => void} [callbacks.onSelectMessage] сообщение выделено
+ * @param {(msg: object) => void} [callbacks.onOpenImage] клик по превью изображения
+ * @param {() => void} [callbacks.onFocusRequest] вызывается перед взятием фокуса мышью
  */
-export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu } = {}) {
+export function createChatView(screen, theme, {
+    onLoadMoreHistory,
+    onActionMenu,
+    onSelectMessage,
+    onOpenImage,
+    onFocusRequest,
+} = {}) {
     const container = blessed.box({
         parent: screen,
         top: 4,
@@ -41,9 +53,13 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         bottom: 0,
         tags: true,
         scrollable: true,
+        // alwaysScroll обязателен: без него blessed копит смещение в childOffset,
+        // не двигая содержимое (первые щелчки колеса «проглатываются»), а getScroll()
+        // перестаёт совпадать с реальным сдвигом ленты — клики попадали не в то сообщение.
+        alwaysScroll: true,
         mouse: true,
-        keys: true,
-        vi: true,
+        // keys/vi намеренно выключены: их встроенные обработчики скроллят ленту на
+        // стрелках, а стрелки здесь двигают выделение. Все клавиши навешаны явно ниже.
         scrollbar: {
             ch: "│",
             style: {
@@ -57,6 +73,11 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         },
     });
 
+    // blessed сам вешает на scrollable-box с mouse:true прокрутку колесом на пол-экрана.
+    // Вместе с нашими обработчиками получалось height/2 + 3 строки за щелчок.
+    scrollBox.removeAllListeners("wheelup");
+    scrollBox.removeAllListeners("wheeldown");
+
     /** Подсвечивает рамку, когда лента сообщений в фокусе. */
     function setFocusHighlight(active) {
         container.style.border.fg = active ? theme.borders.focusFg : theme.borders.fg;
@@ -68,12 +89,13 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
 
     let currentMessages = [];
     let currentRanges = [];
+    let selectedId = null;
 
     /**
      * Форматирует список сообщений в единую ленту текста с разметкой Blessed
      * и вычисляет координаты строк каждого сообщения для кликов мыши.
      * @param {Array<object>} messages
-     * @returns {{ text: string, ranges: Array<{ message: object, startLine: number, endLine: number }> }}
+     * @returns {{ text: string, ranges: Array<object> }}
      */
     function renderMessagesWithRanges(messages) {
         if (!messages || messages.length === 0) {
@@ -110,12 +132,14 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
                 authorTag = `${fg(theme.chatView.incomingName, `{bold}${name}{/bold}`)} ${timeTag}`;
             }
 
+            // Метка редактирования
+            const editedTag = msg.editDate ? ` ${fg(theme.chatView.time, "(изменено)")}` : "";
+
+            const lines = [` ${authorTag}${editedTag}`];
+
             // Блок ответа (Reply)
-            let replyBlock = "";
-            let replyLines = 0;
             if (msg.replyToMsgId) {
-                replyBlock = `  ${fg(theme.chatView.replyBorder, `┌─ Ответ на сообщение #${msg.replyToMsgId}`)}\n`;
-                replyLines = 1;
+                lines.push(`  ${fg(theme.chatView.replyBorder, `┌─ Ответ на сообщение #${msg.replyToMsgId}`)}`);
             }
 
             // Текст сообщения и entities
@@ -135,39 +159,65 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
                 bodyText = bodyText ? `${mediaBlock}\n${bodyText}` : mediaBlock;
             }
 
-            // Отступ строк текста сообщения
-            const indentedBody = bodyText
-                .split("\n")
-                .map((line) => `  ${line}`)
-                .join("\n");
-            const bodyLinesCount = indentedBody.split("\n").length;
-
-            // Реакции
-            let reactionsLine = "";
-            let reactionLinesCount = 0;
-            if (msg.reactions && msg.reactions.length > 0) {
-                const list = msg.reactions.map((r) => `${r.emoticon} ${r.count}`).join("  ");
-                reactionsLine = `\n  ${fg(theme.chatView.reactionFg, `{bold}${list}{/bold}`)}`;
-                reactionLinesCount = 1;
+            // Строка, с которой начинается тело — нужна для координат превью
+            const bodyStartOffset = lines.length;
+            for (const line of bodyText.split("\n")) {
+                lines.push(`  ${line}`);
             }
 
-            // Метка редактирования
-            let editedTag = "";
-            if (msg.editDate) {
-                editedTag = ` ${fg(theme.chatView.time, "(изменено)")}`;
+            // Реакции
+            if (msg.reactions && msg.reactions.length > 0) {
+                const list = msg.reactions.map((r) => `${r.emoticon} ${r.count}`).join("  ");
+                lines.push(`  ${fg(theme.chatView.reactionFg, `{bold}${list}{/bold}`)}`);
             }
 
             const startLine = lineCursor;
-            const totalMsgLines = 1 + replyLines + bodyLinesCount + reactionLinesCount;
-            const endLine = startLine + totalMsgLines - 1;
 
-            ranges.push({ message: msg, startLine, endLine });
-            lineCursor += totalMsgLines + 2;
+            // Прямоугольник превью изображения внутри сообщения
+            let image = null;
+            if (msg.imagePreview) {
+                const descLines = msg.mediaDescription ? msg.mediaDescription.split("\n").length : 0;
+                const previewLines = msg.imagePreview.split("\n");
+                const imageStart = startLine + bodyStartOffset + descLines;
+                const width = previewLines.reduce((max, line) => Math.max(max, stringCellWidth(line)), 0);
+                image = {
+                    startLine: imageStart,
+                    endLine: imageStart + previewLines.length - 1,
+                    left: BODY_INDENT,
+                    right: BODY_INDENT + width,
+                };
+            }
 
-            output += ` ${authorTag}${editedTag}\n${replyBlock}${indentedBody}${reactionsLine}\n\n`;
+            // Выделенное сообщение помечается полосой в первой колонке. Первая колонка
+            // каждой строки — пробел отступа, поэтому ширина строк не меняется и карта
+            // координат остаётся верной.
+            const rendered = msg.id === selectedId
+                ? lines.map((line) => `${fg(theme.accent, "▌")}${line.slice(1)}`)
+                : lines;
+
+            ranges.push({
+                message: msg,
+                startLine,
+                endLine: startLine + lines.length - 1,
+                image,
+            });
+
+            // lines.length строк + одна пустая строка-разделитель между сообщениями
+            lineCursor += lines.length + 1;
+            output += `${rendered.join("\n")}\n\n`;
         }
 
         return { text: output, ranges };
+    }
+
+    /** Перерисовывает ленту, сохраняя позицию прокрутки (например, после смены выделения). */
+    function redraw() {
+        const prevBase = scrollBox.childBase || 0;
+        const rendered = renderMessagesWithRanges(currentMessages);
+        currentRanges = rendered.ranges;
+        scrollBox.setContent(rendered.text);
+        scrollBox.scrollTo(prevBase);
+        screen.render();
     }
 
     /**
@@ -177,8 +227,13 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
      */
     function setMessages(messages, autoScrollToBottom = true) {
         currentMessages = messages;
-        const prevScroll = scrollBox.getScroll();
+        const prevScroll = scrollBox.childBase || 0;
         const prevHeight = scrollBox.getScrollHeight();
+
+        // Выделенное сообщение могло быть удалено или относиться к другому чату
+        if (selectedId !== null && !messages.some((m) => m.id === selectedId)) {
+            selectedId = null;
+        }
 
         const rendered = renderMessagesWithRanges(messages);
         currentRanges = rendered.ranges;
@@ -200,10 +255,108 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         screen.render();
     }
 
+    /**
+     * Переводит номер отрисованной строки в номер строки исходного содержимого.
+     * blessed переносит длинные строки, поэтому напрямую индексы не совпадают.
+     * @param {number} renderedLine
+     * @returns {number}
+     */
+    function toContentLine(renderedLine) {
+        const rtof = scrollBox._clines?.rtof;
+        if (Array.isArray(rtof) && renderedLine >= 0 && renderedLine < rtof.length) {
+            return rtof[renderedLine];
+        }
+        return renderedLine;
+    }
+
+    /**
+     * Обратное преобразование: первая и последняя отрисованные строки для строки содержимого.
+     * @param {number} contentLine
+     * @param {"first"|"last"} edge
+     * @returns {number}
+     */
+    function toRenderedLine(contentLine, edge = "first") {
+        const ftor = scrollBox._clines?.ftor;
+        const mapped = Array.isArray(ftor) ? ftor[contentLine] : null;
+        if (!Array.isArray(mapped) || mapped.length === 0) return contentLine;
+        return edge === "first" ? mapped[0] : mapped[mapped.length - 1];
+    }
+
+    /** Подкручивает ленту так, чтобы выделенное сообщение было видно целиком. */
+    function scrollMessageIntoView(range) {
+        if (!range) return;
+        const visible = scrollBox.height - scrollBox.iheight;
+        const base = scrollBox.childBase || 0;
+        const top = toRenderedLine(range.startLine, "first");
+        const bottom = toRenderedLine(range.endLine, "last");
+
+        if (top < base) {
+            scrollBox.scrollTo(top);
+        } else if (bottom >= base + visible) {
+            scrollBox.scrollTo(Math.max(0, bottom - visible + 1));
+        }
+    }
+
+    /**
+     * Выделяет сообщение по идентификатору.
+     * @param {number|null} id
+     * @param {object} [options]
+     * @param {boolean} [options.scrollIntoView=false]
+     * @param {boolean} [options.notify=false] вызвать onSelectMessage
+     */
+    function setSelected(id, { scrollIntoView = false, notify = false } = {}) {
+        if (selectedId === id && !scrollIntoView) return;
+        selectedId = id;
+        redraw();
+
+        const range = currentRanges.find((r) => r.message.id === id);
+        if (scrollIntoView && range) {
+            scrollMessageIntoView(range);
+            screen.render();
+        }
+        if (notify && range) {
+            onSelectMessage?.(range.message);
+        }
+    }
+
+    /** @returns {object|null} выделенное сообщение */
+    function getSelected() {
+        if (selectedId === null) return null;
+        return currentMessages.find((m) => m.id === selectedId) || null;
+    }
+
+    /** Сообщение, над которым выполняются действия: выделенное, иначе последнее. */
+    function getTargetMessage() {
+        return getSelected() || currentMessages[currentMessages.length - 1] || null;
+    }
+
+    /**
+     * Двигает выделение на step сообщений и подкручивает ленту к нему.
+     * @param {number} step
+     */
+    function selectByOffset(step) {
+        if (currentMessages.length === 0) return;
+
+        const currentIndex = currentMessages.findIndex((m) => m.id === selectedId);
+        let nextIndex;
+        if (currentIndex === -1) {
+            nextIndex = currentMessages.length - 1;
+        } else {
+            nextIndex = Math.min(currentMessages.length - 1, Math.max(0, currentIndex + step));
+        }
+
+        setSelected(currentMessages[nextIndex].id, { scrollIntoView: true, notify: true });
+
+        // Дошли до верха ленты — подтягиваем предыдущую страницу истории
+        if (nextIndex === 0 && step < 0) {
+            onLoadMoreHistory?.();
+        }
+    }
+
     // Обработка прокрутки вверх для подгрузки истории
     function handleScrollUp(step = 10) {
         scrollBox.scroll(-step);
-        if (scrollBox.getScroll() <= 0) {
+        if ((scrollBox.childBase || 0) <= 0) {
             onLoadMoreHistory?.();
         }
         screen.render();
@@ -216,8 +369,8 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
 
     scrollBox.key(["pageup", "C-u"], () => handleScrollUp(10));
     scrollBox.key(["pagedown", "C-d"], () => handleScrollDown(10));
-    scrollBox.key(["up", "k"], () => handleScrollUp(2));
-    scrollBox.key(["down", "j"], () => handleScrollDown(2));
+    scrollBox.key(["up", "k"], () => selectByOffset(-1));
+    scrollBox.key(["down", "j"], () => selectByOffset(1));
     scrollBox.key(["home"], () => {
         scrollBox.scrollTo(0);
         onLoadMoreHistory?.();
@@ -228,41 +381,48 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         screen.render();
     });
 
-    scrollBox.on("wheelup", () => {
-        handleScrollUp(3);
-    });
-
-    scrollBox.on("wheeldown", () => {
-        handleScrollDown(3);
-    });
-
-    container.on("wheelup", () => {
-        handleScrollUp(3);
-    });
-
-    container.on("wheeldown", () => {
-        handleScrollDown(3);
-    });
+    scrollBox.on("wheelup", () => handleScrollUp(3));
+    scrollBox.on("wheeldown", () => handleScrollDown(3));
+    container.on("wheelup", () => handleScrollUp(3));
+    container.on("wheeldown", () => handleScrollDown(3));
 
     scrollBox.on("click", (data) => {
-        const clickY = data.y;
-        const itop = scrollBox.itop || 0;
-        const lineIndex = clickY - (scrollBox.atop || 0) + scrollBox.getScroll() - itop;
-        const clickedMsg = getMessageAtLine(lineIndex, currentRanges);
-        if (clickedMsg) {
-            onActionMenu?.(clickedMsg);
-        } else {
+        const renderedLine = data.y - (scrollBox.atop || 0) - (scrollBox.itop || 0) + (scrollBox.childBase || 0);
+        const relX = data.x - (scrollBox.aleft || 0) - (scrollBox.ileft || 0);
+        const hit = getMessagePartAtPoint(toContentLine(renderedLine), relX, currentRanges);
+
+        if (!hit) {
+            // Клик по пустому месту ленты — просто передаём ей фокус
+            onFocusRequest?.();
             scrollBox.focus();
             screen.render();
+            return;
         }
+
+        if (isRightClick(data)) {
+            setSelected(hit.message.id);
+            onActionMenu?.(hit.message);
+            return;
+        }
+
+        if (hit.part === "image") {
+            setSelected(hit.message.id);
+            onOpenImage?.(hit.message);
+            return;
+        }
+
+        onFocusRequest?.();
+        scrollBox.focus();
+        setSelected(hit.message.id, { notify: true });
     });
 
     // Ctrl+M терминал шлёт как "\r" (имя клавиши "return"), поэтому меню действий
     // висит на Ctrl+A — иначе оно недостижимо.
-    scrollBox.key(["C-a"], () => {
-        if (currentMessages.length > 0) {
-            const lastMsg = currentMessages[currentMessages.length - 1];
-            onActionMenu?.(lastMsg);
+    scrollBox.key(["C-a", "enter", "return"], () => {
+        const msg = getTargetMessage();
+        if (msg) {
+            setSelected(msg.id);
+            onActionMenu?.(msg);
         }
     });
 
@@ -270,6 +430,10 @@ export function createChatView(screen, theme, { onLoadMoreHistory, onActionMenu 
         container,
         scrollBox,
         setMessages,
+        setSelected,
+        getSelected,
+        getTargetMessage,
+        selectByOffset,
         loadMore: () => onLoadMoreHistory?.(),
         scrollToBottom: () => {
             scrollBox.setScrollPerc(100);

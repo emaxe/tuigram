@@ -2,7 +2,7 @@ import blessed from "neo-blessed";
 import { escapeBlessed } from "../../telegram/formatter.js";
 import { fg } from "../theme.js";
 
-import { getHeaderActionAt } from "../../utils/mouse.js";
+import { getHeaderActionAt, isRightClick } from "../../utils/mouse.js";
 
 /**
  * Верхняя шапка приложения с информацией о пользователе, активном чате и статусе соединения.
@@ -39,6 +39,7 @@ export function createHeader(screen, theme, { onHelp, onChatInfo, onStatusClick 
     });
 
     headerBox.on("click", (data) => {
+        if (isRightClick(data)) return;
         const relX = data.x - (headerBox.aleft || 0);
         const relY = data.y - (headerBox.atop || 0);
         const action = getHeaderActionAt(relX, relY, { hasActiveChat: Boolean(currentActiveChat) });

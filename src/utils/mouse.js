@@ -25,6 +25,17 @@ export function stringCellWidth(text) {
 }
 
 /**
+ * Отличает клик правой кнопкой от остальных.
+ * neo-blessed эмитит одно и то же событие "click" для любой кнопки мыши,
+ * поэтому компоненты, где правый клик не имеет смысла, обязаны его отсеивать.
+ * @param {{ button?: string }} [data] данные события мыши blessed
+ * @returns {boolean}
+ */
+export function isRightClick(data) {
+    return data?.button === "right";
+}
+
+/**
  * Проверяет, попадают ли координаты (x, y) внутрь прямоугольной области.
  * @param {number} x абсолютная или относительная X-координата
  * @param {number} y абсолютная или относительная Y-координата
@@ -64,71 +75,8 @@ export function getTabByCoordinate(relativeX, tabKeys = DEFAULT_TAB_KEYS, tabNam
 }
 
 /**
- * Строит карту диапазонов строк для каждого сообщения в ленте чата.
- * Нужна для точного определения сообщения, по которому кликнули мышью в ChatView.
- * @param {Array<object>} messages список сообщений чата
- * @returns {Array<{ message: object, startLine: number, endLine: number }>}
- */
-export function buildMessageLineRanges(messages) {
-    if (!messages || messages.length === 0) return [];
-
-    const ranges = [];
-    let currentLine = 0;
-    let lastDateString = "";
-
-    for (const msg of messages) {
-        // 1. Проверяем разделитель дат (если дата изменилась)
-        const dateDivider = msg.date ? new Date(msg.date).toLocaleDateString("ru-RU") : "";
-        if (dateDivider && dateDivider !== lastDateString) {
-            // Форматтер добавляет: \n ─────── дата ─────── \n\n (3 строки)
-            currentLine += 3;
-            lastDateString = dateDivider;
-        }
-
-        const startLine = currentLine;
-
-        // 2. Строка автора/времени
-        currentLine += 1;
-
-        // 3. Блок ответа (Reply), если есть
-        if (msg.replyToMsgId) {
-            currentLine += 1;
-        }
-
-        // 4. Тело сообщения (текст + медиа-описание + превью)
-        let bodyLinesCount = 1;
-        const parts = [];
-        if (msg.mediaDescription) parts.push(msg.mediaDescription);
-        if (msg.imagePreview) parts.push(msg.imagePreview);
-        if (msg.text) parts.push(msg.text);
-
-        if (parts.length > 0) {
-            const fullBody = parts.join("\n");
-            bodyLinesCount = fullBody.split("\n").length;
-        }
-        currentLine += bodyLinesCount;
-
-        // 5. Реакции, если есть
-        if (msg.reactions && msg.reactions.length > 0) {
-            currentLine += 1;
-        }
-
-        // 6. Замыкающий отступ между сообщениями (\n\n)
-        const endLine = currentLine;
-        currentLine += 2;
-
-        ranges.push({
-            message: msg,
-            startLine,
-            endLine,
-        });
-    }
-
-    return ranges;
-}
-
-/**
  * Находит сообщение в ленте по номеру отображаемой строки с учётом текущей прокрутки.
+ * Карту строк строит ChatView при отрисовке ленты — только он знает реальную вёрстку.
  * @param {number} lineIndex индекс строки в буфере ленты (0-based)
  * @param {Array<{ message: object, startLine: number, endLine: number }>} ranges
  * @returns {object|null}
@@ -140,6 +88,30 @@ export function getMessageAtLine(lineIndex, ranges) {
         if (lineIndex >= item.startLine && lineIndex <= item.endLine) {
             return item.message;
         }
+    }
+
+    return null;
+}
+
+/**
+ * Определяет, в какую часть сообщения попал клик: в превью изображения или в остальной текст.
+ * @param {number} lineIndex индекс строки в буфере ленты (0-based)
+ * @param {number} relativeX смещение по X от левого края ленты (в ячейках)
+ * @param {Array<{ message: object, startLine: number, endLine: number, image?: object|null }>} ranges
+ * @returns {{ message: object, part: "image"|"body" }|null}
+ */
+export function getMessagePartAtPoint(lineIndex, relativeX, ranges) {
+    if (!ranges || ranges.length === 0 || lineIndex < 0) return null;
+
+    for (const item of ranges) {
+        if (lineIndex < item.startLine || lineIndex > item.endLine) continue;
+
+        const image = item.image;
+        const insideImage = Boolean(image)
+            && lineIndex >= image.startLine && lineIndex <= image.endLine
+            && relativeX >= image.left && relativeX < image.right;
+
+        return { message: item.message, part: insideImage ? "image" : "body" };
     }
 
     return null;
@@ -179,6 +151,9 @@ export function getStatusBarActionAt(relativeX, totalWidth = 120) {
     return null;
 }
 
+/** Ширина логотипа « 🚀 TuiGram» в ячейках — кликабельная зона вызова справки. */
+const HEADER_LOGO_WIDTH = stringCellWidth(" 🚀 TuiGram");
+
 /**
  * Определяет действие при клике на верхнюю шапку приложения.
  * @param {number} relativeX смещение по X от левого края шапки
@@ -190,7 +165,8 @@ export function getStatusBarActionAt(relativeX, totalWidth = 120) {
 export function getHeaderActionAt(relativeX, relativeY, { hasActiveChat = false } = {}) {
     // Внутренняя строка 1 (верхняя линия контента): логотип TuiGram, имя пользователя, статус
     if (relativeY === 1) {
-        if (relativeX >= 1 && relativeX <= 14) {
+        // Контент шапки начинается после рамки, поэтому логотип занимает ячейки 1..HEADER_LOGO
+        if (relativeX >= 1 && relativeX <= HEADER_LOGO_WIDTH) {
             return "help";
         }
         return "status";
@@ -207,6 +183,20 @@ export function getHeaderActionAt(relativeX, relativeY, { hasActiveChat = false 
 }
 
 /**
+ * Сегменты подсказок контекстной строки ввода в том порядке и с теми подписями,
+ * какими их рисует inputBox.renderContext. Ширины считаются из самих подписей —
+ * зашитые вручную координаты разъезжались при любой правке текста.
+ */
+const INPUT_HINT_SEGMENTS = [
+    { id: null, label: " Введите сообщение...  " },
+    { id: null, label: "[Enter] Отправить  " },
+    { id: null, label: "[Ctrl+J] Новая строка  " },
+    { id: "reply", label: "[Ctrl+R] Ответ  " },
+    { id: "edit", label: "[Ctrl+E] Правка  " },
+    { id: "commands", label: "[/] Команды" },
+];
+
+/**
  * Определяет действие при клике на контекстную строку поля ввода.
  * @param {number} relativeX смещение по X от левого края контекстной строки
  * @param {string|null} mode текущий режим ("reply"|"edit"|null)
@@ -220,16 +210,13 @@ export function getInputContextActionAt(relativeX, mode) {
 
     if (relativeX < 0) return null;
 
-    // Подсказки в обычном режиме:
-    //  Введите сообщение...   [Enter] Отправить   [Ctrl+J] Новая строка   [Ctrl+R] Ответ   [Ctrl+E] Правка   [/] Команды
-    if (relativeX >= 55 && relativeX < 73) {
-        return "reply";
-    }
-    if (relativeX >= 73 && relativeX < 91) {
-        return "edit";
-    }
-    if (relativeX >= 91) {
-        return "commands";
+    let currentX = 0;
+    for (const seg of INPUT_HINT_SEGMENTS) {
+        const segWidth = stringCellWidth(seg.label);
+        if (relativeX >= currentX && relativeX < currentX + segWidth) {
+            return seg.id;
+        }
+        currentX += segWidth;
     }
 
     return null;

@@ -2,7 +2,7 @@ import blessed from "neo-blessed";
 import { escapeBlessed } from "../../telegram/formatter.js";
 import { fg, badge } from "../theme.js";
 
-import { getInputContextActionAt } from "../../utils/mouse.js";
+import { getInputContextActionAt, isRightClick } from "../../utils/mouse.js";
 
 /**
  * Создаёт компонент поля ввода сообщения (нижняя панель).
@@ -124,6 +124,7 @@ export function createInputBox(screen, theme, {
     }
 
     contextBar.on("click", (data) => {
+        if (isRightClick(data)) return;
         const relX = data.x - (contextBar.aleft || 0);
         const action = getInputContextActionAt(relX, currentMode);
         if (action === "cancel") {

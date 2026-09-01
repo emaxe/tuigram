@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
-import { createScreen } from "./screen.js";
+import { createScreen, setMouseCapture } from "./screen.js";
 import { getTheme } from "./theme.js";
 import { createHeader } from "./components/header.js";
 import { createChatList } from "./components/chatList.js";
@@ -12,16 +12,18 @@ import { createChatInfoModal } from "./components/modals/chatInfoModal.js";
 import { createActionModal } from "./components/modals/actionModal.js";
 import { createFileModal } from "./components/modals/fileModal.js";
 import { createConfirmModal } from "./components/modals/confirmModal.js";
+import { createImageViewerModal } from "./components/modals/imageViewerModal.js";
 import { state } from "../state.js";
 import { config } from "../config.js";
 import { fetchDialogs } from "../telegram/dialogs.js";
 import { setMessagePalette } from "../telegram/formatter.js";
-import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead, loadMessageImagePreview } from "../telegram/messages.js";
+import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead, loadMessageImagePreview, downloadImageBuffer, renderMessageThumbnail } from "../telegram/messages.js";
 import { startTelegramListener } from "../telegram/listener.js";
 import { logout } from "../telegram/auth.js";
 import { ensureDir, inspectLocalFile } from "../utils/storage.js";
 import { formatFileSize } from "../utils/time.js";
 import { parseSendFileArgs } from "../utils/commands.js";
+import { isRightClick } from "../utils/mouse.js";
 
 /**
  * Запускает полноэкранный TUI-клиент Telegram.
@@ -93,10 +95,10 @@ export async function startTui(client, me) {
                 statusBar.showMessage("Сначала выберите чат слева!", "warning");
                 return;
             }
-            const msgs = state.getMessages(state.activeChat.id);
-            if (msgs.length > 0) {
+            const msg = chatView.getTargetMessage();
+            if (msg) {
                 releaseInputs();
-                actionModal.show(msgs[msgs.length - 1]);
+                actionModal.show(msg);
             }
         },
         onChatInfo: () => {
@@ -123,6 +125,16 @@ export async function startTui(client, me) {
     const confirmModal = createConfirmModal(screen, theme);
     const fileModal = createFileModal(screen, theme, {
         onSendFile: (files, options) => sendFilesToActiveChat(files, options),
+    });
+
+    const imageViewerModal = createImageViewerModal(screen, theme, {
+        onLoadFullImage: (msg) => downloadImageBuffer(client, msg.rawMessage),
+        // Пока качается оригинал, показываем встроенную в сообщение миниатюру
+        onRenderPlaceholder: (msg, size) => renderMessageThumbnail(msg.rawMessage, {
+            maxWidth: size.maxWidth,
+            maxHeight: size.maxHeight,
+            useCache: false,
+        }),
     });
 
     const actionModal = createActionModal(screen, theme, {
@@ -239,6 +251,19 @@ export async function startTui(client, me) {
             releaseInputs();
             actionModal.show(msg);
         },
+        onSelectMessage: (msg) => {
+            const preview = (msg.text || msg.mediaDescription || "вложение").replace(/\s+/g, " ").slice(0, 30);
+            statusBar.showMessage(
+                `Выделено #${msg.id}: "${preview}" · [Enter] или правый клик — действия`,
+                "info",
+                3000
+            );
+        },
+        onOpenImage: (msg) => {
+            releaseInputs();
+            imageViewerModal.show(msg);
+        },
+        onFocusRequest: () => releaseInputs(),
     });
 
     // 4. Поле ввода (нижняя панель)
@@ -276,21 +301,8 @@ export async function startTui(client, me) {
         onCancelContext: () => {
             statusBar.showMessage("Режим ответа/редактирования сброшен", "info", 2000);
         },
-        onReplyLast: () => {
-            if (!state.activeChat) return;
-            const msgs = state.getMessages(state.activeChat.id);
-            if (msgs.length > 0) {
-                inputBox.setContext("reply", msgs[msgs.length - 1]);
-            }
-        },
-        onEditLast: () => {
-            if (!state.activeChat) return;
-            const msgs = state.getMessages(state.activeChat.id);
-            const ownMsgs = msgs.filter((m) => m.out);
-            if (ownMsgs.length > 0) {
-                inputBox.setContext("edit", ownMsgs[ownMsgs.length - 1]);
-            }
-        },
+        onReplyLast: () => startReply(),
+        onEditLast: () => startEdit(),
         onSlashCommand: (cmd, args) => {
             switch (cmd) {
                 case "help":
@@ -356,7 +368,8 @@ export async function startTui(client, me) {
     });
 
     // Переключение фокуса по клику мышью на любую из трех панелей
-    chatList.container.on("click", () => {
+    chatList.container.on("click", (data) => {
+        if (isRightClick(data)) return;
         if (screen.focused !== chatList.list && screen.focused !== chatList.searchBox) {
             releaseInputs();
             chatList.focus();
@@ -365,7 +378,8 @@ export async function startTui(client, me) {
         }
     });
 
-    chatView.container.on("click", () => {
+    chatView.container.on("click", (data) => {
+        if (isRightClick(data)) return;
         if (screen.focused !== chatView.scrollBox) {
             releaseInputs();
             chatView.focus();
@@ -374,7 +388,8 @@ export async function startTui(client, me) {
         }
     });
 
-    inputBox.container.on("click", () => {
+    inputBox.container.on("click", (data) => {
+        if (isRightClick(data)) return;
         if (screen.focused !== inputBox.textarea) {
             inputBox.focus();
             statusBar.showMessage("Фокус: поле ввода", "info", 2000);
@@ -403,6 +418,7 @@ export async function startTui(client, me) {
             typingUser: state.getTypingUser(chat?.id),
         });
         const msgs = chat ? state.getMessages(chat.id) : [];
+        chatView.setSelected(null);
         chatView.setMessages(msgs);
     });
 
@@ -572,6 +588,31 @@ export async function startTui(client, me) {
         chatList.release?.();
     }
 
+    /** Включает режим ответа на выделенное сообщение, иначе — на последнее в ленте. */
+    function startReply() {
+        if (!state.activeChat) return;
+        const target = chatView.getTargetMessage();
+        if (target) {
+            inputBox.setContext("reply", target);
+        }
+    }
+
+    /** Включает правку выделенного своего сообщения, иначе — последнего своего. */
+    function startEdit() {
+        if (!state.activeChat) return;
+        const selected = chatView.getSelected();
+        if (selected?.out) {
+            inputBox.setContext("edit", selected);
+            return;
+        }
+        const ownMsgs = state.getMessages(state.activeChat.id).filter((m) => m.out);
+        if (ownMsgs.length > 0) {
+            inputBox.setContext("edit", ownMsgs[ownMsgs.length - 1]);
+        } else {
+            statusBar.showMessage("В этом чате нет ваших сообщений для правки", "warning", 3000);
+        }
+    }
+
     // 7. Глобальные сочетания клавиш
     // Цикл фокуса: список чатов -> лента сообщений -> поле ввода -> список чатов.
     // Без ленты в цикле были недостижимы прокрутка, подгрузка истории и меню действий.
@@ -614,17 +655,18 @@ export async function startTui(client, me) {
     screen.key(["tab"], () => moveFocus(1));
     screen.key(["S-tab"], () => moveFocus(-1));
 
+    // Когда лента в фокусе, эти клавиши обрабатывает она сама — иначе прокрутка удваивается
     screen.key(["pageup", "C-u"], () => {
-        if (!state.activeChat) return;
+        if (!state.activeChat || screen.focused === chatView.scrollBox) return;
         chatView.scrollBox.scroll(-10);
-        if (chatView.scrollBox.getScroll() <= 0) {
+        if ((chatView.scrollBox.childBase || 0) <= 0) {
             chatView.loadMore?.();
         }
         screen.render();
     });
 
     screen.key(["pagedown", "C-d"], () => {
-        if (!state.activeChat) return;
+        if (!state.activeChat || screen.focused === chatView.scrollBox) return;
         chatView.scrollBox.scroll(10);
         screen.render();
     });
@@ -653,23 +695,36 @@ export async function startTui(client, me) {
         }
     });
 
-    screen.key(["C-r"], () => {
-        if (!state.activeChat) return;
-        const msgs = state.getMessages(state.activeChat.id);
-        if (msgs.length > 0) {
-            const lastMsg = msgs[msgs.length - 1];
-            inputBox.setContext("reply", lastMsg);
+    screen.key(["C-r"], () => startReply());
+
+    screen.key(["C-e"], () => startEdit());
+
+    // Меню действий над выделенным сообщением из любой панели.
+    // Когда лента в фокусе, Ctrl+A обрабатывает она сама.
+    screen.key(["C-a"], () => {
+        if (screen.focused === chatView.scrollBox) return;
+        if (!state.activeChat) {
+            statusBar.showMessage("Сначала выберите чат слева!", "warning");
+            return;
+        }
+        const msg = chatView.getTargetMessage();
+        if (msg) {
+            releaseInputs();
+            actionModal.show(msg);
         }
     });
 
-    screen.key(["C-e"], () => {
-        if (!state.activeChat) return;
-        const msgs = state.getMessages(state.activeChat.id);
-        const ownMsgs = msgs.filter((m) => m.out);
-        if (ownMsgs.length > 0) {
-            const lastOwn = ownMsgs[ownMsgs.length - 1];
-            inputBox.setContext("edit", lastOwn);
-        }
+    // Пока мышь захвачена приложением, терминал не даёт выделять текст для копирования
+    screen.key(["f12"], () => {
+        const enabled = !screen.mouseCaptured;
+        setMouseCapture(screen, enabled);
+        statusBar.showMessage(
+            enabled
+                ? "Мышь снова управляет интерфейсом"
+                : "Мышь отдана терминалу — можно выделять и копировать текст. [F12] вернуть",
+            enabled ? "info" : "warning",
+            5000
+        );
     });
 
     screen.key(["C-q"], () => {

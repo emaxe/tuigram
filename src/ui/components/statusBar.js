@@ -1,7 +1,7 @@
 import blessed from "neo-blessed";
 import { fg } from "../theme.js";
 
-import { getStatusBarActionAt } from "../../utils/mouse.js";
+import { getStatusBarActionAt, isRightClick } from "../../utils/mouse.js";
 
 /**
  * Создаёт нижнюю строку состояния (Status Bar) с подсказками и временными тостами.
@@ -43,6 +43,7 @@ export function createStatusBar(screen, theme, {
     });
 
     statusBar.on("click", (data) => {
+        if (isRightClick(data)) return;
         const relX = data.x - (statusBar.aleft || 0);
         const action = getStatusBarActionAt(relX, statusBar.width || 120);
         switch (action) {

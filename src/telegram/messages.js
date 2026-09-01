@@ -7,6 +7,39 @@ import { renderStrippedThumbnail, renderImageBuffer } from "../utils/image.js";
 const { FloodWaitError } = errors;
 
 /**
+ * Синхронно рисует миниатюру, встроенную в само сообщение (PhotoStrippedSize).
+ * Сеть не нужна — байты уже пришли вместе с сообщением, поэтому картинку можно
+ * показать мгновенно, пока качается полноразмерная версия.
+ * @param {object} rawMessage
+ * @param {object} [options]
+ * @param {number} [options.maxWidth]
+ * @param {number} [options.maxHeight]
+ * @param {boolean} [options.useCache=true] класть результат в кэш псевдографики
+ * @returns {string} разметка blessed или пустая строка
+ */
+export function renderMessageThumbnail(rawMessage, {
+    maxWidth = config.imageMaxWidth,
+    maxHeight = config.imageMaxHeight,
+    useCache = true,
+} = {}) {
+    const media = rawMessage?.media;
+    if (!media) return "";
+
+    const photo = media.photo;
+    const doc = media.document;
+    const sizes = photo?.sizes || doc?.thumbs || [];
+    const stripped = sizes.find((s) => s?.className === "PhotoStrippedSize" || s?.type === "i" || (s?.bytes && s.bytes.length > 0));
+    if (!stripped?.bytes) return "";
+
+    // Полноэкранные рендеры не кэшируем: одна такая строка весит сотни килобайт
+    const cacheKey = useCache
+        ? (photo?.id ? `photo_${photo.id}` : (doc?.id ? `doc_${doc.id}` : `msg_${rawMessage.id}`))
+        : undefined;
+
+    return renderStrippedThumbnail(stripped.bytes, { maxWidth, maxHeight, cacheKey }) || "";
+}
+
+/**
  * Преобразует объект Message из MTProto в нормализованный объект для TUI.
  * @param {object} message
  * @returns {object}
@@ -41,25 +74,9 @@ export function normalizeMessage(message) {
     }
 
     // Извлечение и рендеринг PhotoStrippedSize в псевдографику
-    let imagePreview = null;
-    if (config.showImages && message.media) {
-        const media = message.media;
-        const photo = media.photo;
-        const doc = media.document;
-        const sizes = photo?.sizes || doc?.thumbs || [];
-        const stripped = sizes.find((s) => s?.className === "PhotoStrippedSize" || s?.type === "i" || (s?.bytes && s.bytes.length > 0));
-
-        if (stripped?.bytes) {
-            const cacheKey = photo?.id
-                ? `photo_${photo.id}`
-                : (doc?.id ? `doc_${doc.id}` : `msg_${message.id}`);
-            imagePreview = renderStrippedThumbnail(stripped.bytes, {
-                maxWidth: config.imageMaxWidth,
-                maxHeight: config.imageMaxHeight,
-                cacheKey,
-            }) || null;
-        }
-    }
+    const imagePreview = config.showImages
+        ? (renderMessageThumbnail(message) || null)
+        : null;
 
     return {
         id: message.id,
@@ -286,6 +303,68 @@ export async function markAsRead(client, rawPeer, maxId = 0) {
     } catch {
         // Игнорируем незначительные сетевые ошибки прочтения
     }
+}
+
+/**
+ * Выбирает самую крупную растровую миниатюру документа.
+ * PhotoPathSize (SVG-контур) и PhotoStrippedSize непригодны для полноэкранного показа.
+ * @param {Array<object>} thumbs
+ * @returns {object|null}
+ */
+function pickLargestThumb(thumbs) {
+    if (!Array.isArray(thumbs) || thumbs.length === 0) return null;
+
+    const weight = (t) => {
+        if (typeof t?.size === "number") return t.size;
+        if (Array.isArray(t?.sizes) && t.sizes.length > 0) return Math.max(...t.sizes);
+        return 0;
+    };
+
+    const usable = thumbs.filter((t) => t?.className !== "PhotoPathSize" && weight(t) > 0);
+    if (usable.length === 0) return null;
+
+    return usable.reduce((best, t) => (weight(t) > weight(best) ? t : best), usable[0]);
+}
+
+/**
+ * Загружает изображение сообщения в максимальном доступном качестве — для просмотра
+ * на весь экран.
+ *
+ * Фото качается оригиналом. У документа (видео, gif, файл) качается только самая
+ * крупная миниатюра: сам файл может весить сотни мегабайт и всё равно не рисуется.
+ *
+ * @param {import("teleproto").TelegramClient} client
+ * @param {object} rawMessage
+ * @returns {Promise<{ buffer: Buffer, mimeType: string }>}
+ */
+export async function downloadImageBuffer(client, rawMessage) {
+    const media = rawMessage?.media;
+    if (!media) {
+        throw new Error("У сообщения нет изображения.");
+    }
+
+    if (media.className === "MessageMediaPhoto") {
+        // Без thumb teleproto отдаёт самый большой размер фотографии
+        const buffer = await client.downloadMedia(media, {});
+        if (!buffer || buffer.length === 0) {
+            throw new Error("Не удалось загрузить изображение.");
+        }
+        return { buffer, mimeType: "image/jpeg" };
+    }
+
+    if (media.className === "MessageMediaDocument") {
+        const thumb = pickLargestThumb(media.document?.thumbs);
+        if (!thumb) {
+            throw new Error("У вложения нет пригодной для показа миниатюры.");
+        }
+        const buffer = await client.downloadMedia(media, { thumb });
+        if (!buffer || buffer.length === 0) {
+            throw new Error("Не удалось загрузить миниатюру вложения.");
+        }
+        return { buffer, mimeType: "image/jpeg" };
+    }
+
+    throw new Error("Этот тип вложения нельзя показать как изображение.");
 }
 
 /**

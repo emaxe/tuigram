@@ -2,7 +2,8 @@ import blessed from "neo-blessed";
 import { escapeBlessed } from "../../../telegram/formatter.js";
 import { fg } from "../../theme.js";
 
-import { isInsideBox } from "../../../utils/mouse.js";
+import { isRightClick } from "../../../utils/mouse.js";
+import { bindOutsideClickClose } from "../../modalMouse.js";
 
 /**
  * Создаёт модальное окно контекстных действий над сообщением.
@@ -72,7 +73,8 @@ export function createActionModal(screen, theme, { onAction } = {}) {
     const baseCreateItem = list.createItem.bind(list);
     list.createItem = (content) => {
         const item = baseCreateItem(content);
-        item.on("click", () => {
+        item.on("click", (data) => {
+            if (isRightClick(data)) return;
             const index = list.getItemIndex(item);
             const action = currentActions[index];
             if (action && currentMsg) {
@@ -128,6 +130,7 @@ export function createActionModal(screen, theme, { onAction } = {}) {
 
         list.setItems(currentActions.map((a) => a.label));
         previousFocus = screen.focused;
+        armOutsideClose();
         modal.show();
         modal.setFront();
         list.focus();
@@ -146,18 +149,7 @@ export function createActionModal(screen, theme, { onAction } = {}) {
     list.key(["escape", "q"], hide);
 
     // Закрытие при клике мышью мимо модального окна
-    screen.on("click", (data) => {
-        if (!modal.visible) return;
-        const inside = isInsideBox(data.x, data.y, {
-            left: modal.aleft,
-            top: modal.atop,
-            width: modal.width,
-            height: modal.height,
-        });
-        if (!inside) {
-            hide();
-        }
-    });
+    const armOutsideClose = bindOutsideClickClose(screen, modal, hide);
 
     return {
         modal,

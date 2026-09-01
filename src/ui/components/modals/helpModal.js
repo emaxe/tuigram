@@ -1,5 +1,5 @@
 import blessed from "neo-blessed";
-import { isInsideBox } from "../../../utils/mouse.js";
+import { bindOutsideClickClose } from "../../modalMouse.js";
 
 /**
  * Создаёт модальное окно справки по всем горячим клавишам и возможностям.
@@ -44,16 +44,21 @@ export function createHelpModal(screen, theme) {
 
  {bold}Навигация и фокус:{/bold}
    ${K_CYAN}[Tab]${K_END} / ${K_CYAN}[Shift+Tab]${K_END}  Фокус по кругу: Список чатов → Лента сообщений → Ввод
-   ${K_CYAN}[↑] / [↓]${K_END}           Перемещение по списку чатов
-   ${K_CYAN}[Enter]${K_END}             Открыть выбранный чат / Загрузить историю
+   ${K_CYAN}[↑] / [↓]${K_END}           Список чатов: перемещение · Лента: выделение сообщения
+   ${K_CYAN}[Enter]${K_END}             Открыть чат / Меню действий над выделенным сообщением
    ${K_CYAN}[PageUp] / [Ctrl+U]${K_END} Прокрутка сообщений вверх / Подгрузка старой истории
    ${K_CYAN}[PageDown] / [Ctrl+D]${K_END}Прокрутка сообщений вниз
+   ${K_CYAN}[Home] / [End]${K_END}       Начало ленты (подгрузка истории) / Последнее сообщение
 
  {bold}Управление мышью:{/bold}
    ${K_CYAN}Клик по диалогу${K_END}      Мгновенно открыть чат
    ${K_CYAN}Колесо мыши${K_END}          Прокрутка списка чатов и сообщений (вверх — подгрузка истории)
-   ${K_CYAN}Клик по сообщению${K_END}    Открыть меню действий над сообщением
+   ${K_CYAN}Левый клик по сообщению${K_END}  Выделить сообщение (помечается полосой ▌ слева)
+   ${K_CYAN}Правый клик по сообщению${K_END} Меню действий над сообщением
+   ${K_CYAN}Клик по картинке${K_END}     Открыть изображение на весь экран (${K_CYAN}[Esc]${K_END} — закрыть)
    ${K_CYAN}Клик по вкладкам/кнопкам${K_END} Переключение фильтров и вызов действий
+   ${K_GRAY}macOS Terminal.app перехватывает правый клик — там пользуйтесь [Enter] или [Ctrl+A]${K_END}
+   ${K_CYAN}[F12]${K_END}               Отдать мышь терминалу, чтобы выделить и скопировать текст
 
  {bold}Вкладки фильтрации диалогов (нажмите цифру в списке чатов):{/bold}
    ${K_YELLOW}[1]${K_END} Все чаты       ${K_YELLOW}[2]${K_END} Личные (ЛС)     ${K_YELLOW}[3]${K_END} Группы
@@ -63,8 +68,8 @@ export function createHelpModal(screen, theme) {
  {bold}Работа с сообщениями:{/bold}
    ${K_GREEN}[Enter]${K_END}             Отправить набранный текст
    ${K_GREEN}[Ctrl+J]${K_END}            Перенос строки без отправки
-   ${K_GREEN}[Ctrl+R]${K_END}            Ответить (Reply) на последнее сообщение
-   ${K_GREEN}[Ctrl+E]${K_END}            Редактировать своё последнее сообщение
+   ${K_GREEN}[Ctrl+R]${K_END}            Ответить (Reply) на выделенное, иначе — на последнее
+   ${K_GREEN}[Ctrl+E]${K_END}            Редактировать выделенное своё, иначе — последнее своё
    ${K_GREEN}[Ctrl+A]${K_END}            Контекстное меню действий (Реакции, Удаление, Скачивание)
    ${K_GREEN}[Ctrl+O]${K_END}            Отправить файл / картинку / документ
    ${K_GREEN}  [Ctrl+F]${K_END}          — в окне отправки: обзор файлов
@@ -122,6 +127,7 @@ export function createHelpModal(screen, theme) {
 
     function show() {
         previousFocus = screen.focused;
+        armOutsideClose();
         modal.show();
         modal.setFront();
         closeBtn.focus();
@@ -134,18 +140,7 @@ export function createHelpModal(screen, theme) {
     closeBtn.key(["escape", "q", "f1"], hide);
 
     // Закрытие при клике мышью мимо модального окна
-    screen.on("click", (data) => {
-        if (!modal.visible) return;
-        const inside = isInsideBox(data.x, data.y, {
-            left: modal.aleft,
-            top: modal.atop,
-            width: modal.width,
-            height: modal.height,
-        });
-        if (!inside) {
-            hide();
-        }
-    });
+    const armOutsideClose = bindOutsideClickClose(screen, modal, hide);
 
     return {
         modal,
