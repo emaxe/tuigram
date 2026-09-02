@@ -13,11 +13,15 @@ import { stringCellWidth, isInsideBox, isRightClick, getTabByCoordinate, getMess
 import { normalizeMessage } from "../src/telegram/messages.js";
 import jpegJs from "jpeg-js";
 import { PNG } from "pngjs";
+import { isMessageVideo, rgb24ToHalfBlockBlessed, extractFirstFileFromZip, findFfmpegPath, isFfmpegAvailable } from "../src/utils/video.js";
+import { config } from "../src/config.js";
+import blessed from "neo-blessed";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import net from "node:net";
+import zlib from "node:zlib";
 
 console.log("▶ Запуск юнит-тестов TuiGram...");
 
@@ -1480,6 +1484,120 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     console.log("  ✓ mouse support & mouse.js tests passed");
 }
 
+// 14. Тесты воспроизведения видео (video.js, videoPlayerModal.js и конфигурации)
+{
+    // 14.1 Определение видеосообщений
+    const videoDocMsg = {
+        media: {
+            className: "MessageMediaDocument",
+            document: {
+                attributes: [{ className: "DocumentAttributeVideo", duration: 15 }],
+            },
+        },
+    };
+    assert.equal(isMessageVideo(videoDocMsg), true, "сообщение с DocumentAttributeVideo должно определяться как видео");
+
+    const mimeVideoMsg = {
+        media: {
+            className: "MessageMediaDocument",
+            document: {
+                mimeType: "video/mp4",
+                attributes: [],
+            },
+        },
+    };
+    assert.equal(isMessageVideo(mimeVideoMsg), true, "сообщение с mimeType video/* должно определяться как видео");
+
+    const photoMsg = {
+        media: {
+            className: "MessageMediaPhoto",
+        },
+    };
+    assert.equal(isMessageVideo(photoMsg), false, "фотография не должна определяться как видео");
+
+    const plainDocMsg = {
+        media: {
+            className: "MessageMediaDocument",
+            document: {
+                mimeType: "application/pdf",
+                attributes: [{ className: "DocumentAttributeFilename", fileName: "test.pdf" }],
+            },
+        },
+    };
+    assert.equal(isMessageVideo(plainDocMsg), false, "PDF не должен определяться как видео");
+    assert.equal(isMessageVideo(null), false);
+    assert.equal(isMessageVideo({}), false);
+
+    // 14.2 Конвертация RGB24 в Half-Block Blessed
+    // 2x2 пикселя: (255,0,0), (0,255,0) сверху и (0,0,255), (255,255,255) снизу
+    const rgbData = Buffer.from([
+        255, 0, 0,    0, 255, 0,
+        0, 0, 255,    255, 255, 255
+    ]);
+    const halfBlock = rgb24ToHalfBlockBlessed(rgbData, 2, 2);
+    assert.ok(halfBlock.includes("▀"), "должен содержать символ полублока ▀");
+    assert.ok(halfBlock.includes("#ff0000"), "должен содержать красный верхний пиксель #ff0000");
+    assert.ok(halfBlock.includes("#0000ff"), "должен содержать синий нижний пиксель #0000ff");
+    assert.ok(halfBlock.includes("#00ff00"), "должен содержать зелёный верхний пиксель #00ff00");
+    assert.ok(halfBlock.includes("#ffffff"), "должен содержать белый нижний пиксель #ffffff");
+
+    assert.equal(rgb24ToHalfBlockBlessed(null, 2, 2), "");
+    assert.equal(rgb24ToHalfBlockBlessed(Buffer.alloc(2), 2, 2), "");
+
+    // 14.3 Проверка конфигурации видео
+    assert.equal(typeof config.enableVideo, "boolean", "config.enableVideo должен быть boolean");
+    assert.ok(config.videoFps >= 1 && config.videoFps <= 30, "config.videoFps должен быть в диапазоне 1..30");
+    assert.equal(typeof config.videoAudio, "boolean", "config.videoAudio должен быть boolean");
+
+    // 14.4 Распаковка ZIP-архива в памяти
+    // Создаём минимальный валидный ZIP-архив с 1 файлом (метод 0 - store)
+    const testFileName = "test.bin";
+    const testPayload = Buffer.from("ffmpeg test binary payload", "utf8");
+    const nameBuf = Buffer.from(testFileName, "utf8");
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0); // Сигнатура
+    localHeader.writeUInt16LE(20, 4);         // Версия
+    localHeader.writeUInt16LE(0, 6);          // Флаги
+    localHeader.writeUInt16LE(0, 8);          // Метод 0 = Store
+    localHeader.writeUInt16LE(0, 10);         // Время
+    localHeader.writeUInt16LE(0, 12);         // Дата
+    localHeader.writeUInt32LE(0, 14);         // CRC32
+    localHeader.writeUInt32LE(testPayload.length, 18); // Compressed size
+    localHeader.writeUInt32LE(testPayload.length, 22); // Uncompressed size
+    localHeader.writeUInt16LE(nameBuf.length, 26);     // Name length
+    localHeader.writeUInt16LE(0, 28);                  // Extra field length
+
+    const zipBuf = Buffer.concat([localHeader, nameBuf, testPayload]);
+    const extracted = extractFirstFileFromZip(zipBuf);
+    assert.equal(extracted.name, testFileName);
+    assert.equal(extracted.data.toString("utf8"), "ffmpeg test binary payload");
+
+    // 14.5 Тест модального окна видеоплеера
+    const { createVideoPlayerModal } = await import("../src/ui/components/modals/videoPlayerModal.js");
+    const testScreen = blessed.screen({ smartCSR: true, dump: false, warnings: false });
+    const testTheme = getTheme("default");
+
+    let videoLoadCalls = 0;
+    const testVideoModal = createVideoPlayerModal(testScreen, testTheme, {
+        onLoadVideoFile: () => {
+            videoLoadCalls++;
+            return Promise.resolve("/tmp/fake_video.mp4");
+        },
+        onRenderPlaceholder: () => "{#112233-fg}▀▀▀▀{/}",
+    });
+
+    assert.equal(testVideoModal.isVisible(), false);
+    testVideoModal.play(videoDocMsg);
+    assert.equal(testVideoModal.isVisible(), true, "плеер должен отображаться при вызове play");
+    testVideoModal.hide();
+    assert.equal(testVideoModal.isVisible(), false, "плеер должен скрываться при вызове hide");
+
+    testScreen.destroy();
+    console.log("  ✓ video.js & videoPlayerModal.js tests passed");
+}
+
 console.log("\n\u2705 Все юнит-тесты TuiGram успешно пройдены!\n");
+
 
 

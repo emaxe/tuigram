@@ -590,6 +590,41 @@ IMAGE_MAX_HEIGHT=14
 
 ---
 
+## 🎬 Video playback in pseudographics
+
+TuiGram supports video playback directly in the terminal using Unicode Half-Block characters (`▀`) and 24-bit RGB truecolor, with synchronized audio playback via system audio or `ffplay`.
+
+### Setup
+Video playback requires `ffmpeg`. You can install it and enable video playback automatically with a single command:
+```bash
+tuigram install-video
+```
+This command checks for existing `ffmpeg`, downloads a static binary if needed, and sets `ENABLE_VIDEO=true` in your `.env`.
+
+### Configuration in `.env`:
+```env
+# Enable video playback in terminal (true/false)
+ENABLE_VIDEO=true
+
+# Playback frame rate (FPS, 1..30, default: 15)
+VIDEO_FPS=15
+
+# Play audio track (true/false)
+VIDEO_AUDIO=true
+
+# Optional custom binary paths
+# FFMPEG_PATH=/usr/local/bin/ffmpeg
+# FFPLAY_PATH=/usr/local/bin/ffplay
+```
+
+### Controls:
+- Click on any video message preview or choose **▶️ Play video** from the action menu (`[Enter]` / right click).
+- `[Space]` — Pause / Resume
+- `[r]` — Replay from beginning
+- `[Esc]` or `[q]` — Close video player
+
+---
+
 ## 🌐 Proxy configuration
 
 TuiGram supports routing MTProto connections through HTTP (including HTTPS CONNECT) and SOCKS5/SOCKS4 proxies — both with and without username/password authentication.
@@ -627,6 +662,9 @@ clone, substitute `node bin/tuigram.js` for `tuigram`):
 ```bash
 # Authorization
 tuigram login
+
+# Install video playback dependencies & enable video in .env
+tuigram install-video
 
 # List dialogs
 tuigram dialogs --limit 30
@@ -684,13 +722,17 @@ TuiGram/
 │   │           ├── chatInfoModal.js # Chat info window
 │   │           ├── actionModal.js   # Message action menu
 │   │           ├── fileModal.js     # Send-file dialog
+│   │           ├── imageViewerModal.js # Full-screen image viewer
+│   │           ├── videoPlayerModal.js # Video player modal
 │   │           └── confirmModal.js  # Confirmation dialog
 │   ├── cli/
 │   │   ├── cliCommands.js       # Standalone CLI commands
 │   │   ├── init.js              # tuigram init / paths — setup and diagnostics
+│   │   ├── videoSetup.js        # tuigram install-video — ffmpeg setup & config
 │   │   └── formatters.js        # Console table and log formatters
 │   └── utils/
 │       ├── image.js             # Image decoding, resizing and Half-Block ANSI rendering
+│       ├── video.js             # Video playback utilities, ffmpeg detection & decoding
 │       ├── storage.js           # File operations and session persistence
 │       └── time.js              # Time and date formatting
 ├── scripts/

@@ -1,6 +1,7 @@
 import blessed from "neo-blessed";
 import { escapeBlessed } from "../../../telegram/formatter.js";
 import { fg } from "../../theme.js";
+import { isMessageVideo } from "../../../utils/video.js";
 
 import { isRightClick } from "../../../utils/mouse.js";
 import { bindOutsideClickClose } from "../../modalMouse.js";
@@ -110,6 +111,10 @@ export function createActionModal(screen, theme, { onAction } = {}) {
         currentActions = [
             { id: "reply", label: "↩️  Ответить (Reply)" },
         ];
+
+        if (isMessageVideo(msg)) {
+            currentActions.push({ id: "play_video", label: "▶️  Воспроизвести видео" });
+        }
 
         if (msg.out) {
             currentActions.push({ id: "edit", label: "✏️  Редактировать текст" });

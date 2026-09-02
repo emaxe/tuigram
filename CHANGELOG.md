@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Video playback support in ANSI pseudographics (Unicode Half-Block) with synchronized audio track.
+- New CLI command `tuigram install-video` to check and automatically install static `ffmpeg` binaries and enable video in `.env`.
+- New configuration settings in `.env`: `ENABLE_VIDEO`, `VIDEO_FPS`, `VIDEO_AUDIO`, `FFMPEG_PATH`, `FFPLAY_PATH`.
+- Video player modal with playback controls (`[Space]` for pause/resume, `[r]` to replay, `[Esc]` / `[q]` to exit).
+- Interactive video playback via message action menu and by clicking on video message preview in chat view.
+
 ### Planned
 
 - English localization of the TUI and CLI interface strings.

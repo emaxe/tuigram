@@ -4,6 +4,7 @@ import { formatMessageText, escapeBlessed } from "../../telegram/formatter.js";
 import { fg } from "../theme.js";
 
 import { getMessagePartAtPoint, isRightClick, stringCellWidth } from "../../utils/mouse.js";
+import { isMessageVideo } from "../../utils/video.js";
 
 /** Отступ тела сообщения от левого края ленты, в ячейках. */
 const BODY_INDENT = 2;
@@ -17,6 +18,7 @@ const BODY_INDENT = 2;
  * @param {(msg: object) => void} [callbacks.onActionMenu] правый клик / Enter / Ctrl+A
  * @param {(msg: object) => void} [callbacks.onSelectMessage] сообщение выделено
  * @param {(msg: object) => void} [callbacks.onOpenImage] клик по превью изображения
+ * @param {(msg: object) => void} [callbacks.onPlayVideo] клик по превью видео
  * @param {() => void} [callbacks.onFocusRequest] вызывается перед взятием фокуса мышью
  */
 export function createChatView(screen, theme, {
@@ -24,6 +26,7 @@ export function createChatView(screen, theme, {
     onActionMenu,
     onSelectMessage,
     onOpenImage,
+    onPlayVideo,
     onFocusRequest,
 } = {}) {
     const container = blessed.box({
@@ -407,7 +410,11 @@ export function createChatView(screen, theme, {
 
         if (hit.part === "image") {
             setSelected(hit.message.id);
-            onOpenImage?.(hit.message);
+            if (isMessageVideo(hit.message) && onPlayVideo) {
+                onPlayVideo(hit.message);
+            } else {
+                onOpenImage?.(hit.message);
+            }
             return;
         }
 

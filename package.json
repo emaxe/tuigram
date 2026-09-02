@@ -57,6 +57,7 @@
     "menu": "./run.sh",
     "tui": "node src/index.js tui",
     "init": "node src/index.js init",
+    "install-video": "node src/index.js install-video",
     "login": "node src/index.js login",
     "dialogs": "node src/index.js dialogs",
     "history": "node src/index.js history",

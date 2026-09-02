@@ -255,6 +255,12 @@ export const config = {
     imageMaxWidth: parseInt(process.env.IMAGE_MAX_WIDTH || "36", 10) || 36,
     imageMaxHeight: parseInt(process.env.IMAGE_MAX_HEIGHT || "14", 10) || 14,
 
+    enableVideo: String(process.env.ENABLE_VIDEO || process.env.ENABLE_VIDEO_PLAYBACK || "false").toLowerCase() === "true",
+    videoFps: Math.min(30, Math.max(1, parseInt(process.env.VIDEO_FPS || "15", 10) || 15)),
+    videoAudio: String(process.env.VIDEO_AUDIO || "true").toLowerCase() !== "false",
+    ffmpegPath: process.env.FFMPEG_PATH || null,
+    ffplayPath: process.env.FFPLAY_PATH || null,
+
     proxy: parseProxyConfig(),
 
     /**

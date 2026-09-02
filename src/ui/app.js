@@ -13,6 +13,7 @@ import { createActionModal } from "./components/modals/actionModal.js";
 import { createFileModal } from "./components/modals/fileModal.js";
 import { createConfirmModal } from "./components/modals/confirmModal.js";
 import { createImageViewerModal } from "./components/modals/imageViewerModal.js";
+import { createVideoPlayerModal } from "./components/modals/videoPlayerModal.js";
 import { state } from "../state.js";
 import { config } from "../config.js";
 import { fetchDialogs } from "../telegram/dialogs.js";
@@ -137,12 +138,47 @@ export async function startTui(client, me) {
         }),
     });
 
+    const videoPlayerModal = createVideoPlayerModal(screen, theme, {
+        onLoadVideoFile: async (msg, progressCallback) => {
+            const downloadsDir = config.downloadsDir;
+            ensureDir(downloadsDir);
+            let fileName = `video_${msg.id}.mp4`;
+            const doc = msg.rawMessage?.media?.document;
+            if (doc?.attributes) {
+                for (const attr of doc.attributes) {
+                    if (attr.className === "DocumentAttributeFilename" && attr.fileName) {
+                        fileName = `msg_${msg.id}_${attr.fileName}`;
+                        break;
+                    }
+                }
+            }
+            const targetPath = path.join(downloadsDir, fileName);
+            if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0) {
+                return targetPath;
+            }
+            const res = await downloadMedia(client, msg.rawMessage, {
+                outputFile: targetPath,
+                progressCallback,
+            });
+            return typeof res === "string" ? res : targetPath;
+        },
+        onRenderPlaceholder: (msg, size) => renderMessageThumbnail(msg.rawMessage, {
+            maxWidth: size.maxWidth,
+            maxHeight: size.maxHeight,
+            useCache: false,
+        }),
+    });
+
     const actionModal = createActionModal(screen, theme, {
         onAction: async (actionId, msg) => {
             if (!state.activeChat) return;
             const peerId = state.activeChat.peerId;
 
             switch (actionId) {
+                case "play_video":
+                    releaseInputs();
+                    videoPlayerModal.play(msg);
+                    break;
                 case "reply":
                     inputBox.setContext("reply", msg);
                     break;
@@ -262,6 +298,10 @@ export async function startTui(client, me) {
         onOpenImage: (msg) => {
             releaseInputs();
             imageViewerModal.show(msg);
+        },
+        onPlayVideo: (msg) => {
+            releaseInputs();
+            videoPlayerModal.play(msg);
         },
         onFocusRequest: () => releaseInputs(),
     });

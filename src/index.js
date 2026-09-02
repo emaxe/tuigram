@@ -14,6 +14,7 @@ import {
     cmdListen
 } from "./cli/cliCommands.js";
 import { cmdInit, cmdPaths } from "./cli/init.js";
+import { cmdInstallVideo } from "./cli/videoSetup.js";
 import { config } from "./config.js";
 import { red, bold } from "colorette";
 
@@ -57,6 +58,7 @@ ${bold("Настройка:")}
   tuigram init                   Ввести ключи Telegram API (api_id / api_hash)
                                  --api-id <ID> --api-hash <HASH>  без диалога
   tuigram paths                  Показать пути к настройкам, сессии и загрузкам
+  tuigram install-video          Установить ffmpeg и включить воспроизведение видео
 
 ${bold("Консольные команды (CLI):")}
   tuigram login                  Авторизация в аккаунте (телефон, код, 2FA)
@@ -102,6 +104,12 @@ async function main() {
         case "paths":
         case "config":
             cmdPaths();
+            process.exit(0);
+            break;
+        case "install-video":
+        case "setup-video":
+        case "install-deps":
+            await cmdInstallVideo(flags);
             process.exit(0);
             break;
         case "login":
