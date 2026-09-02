@@ -37,6 +37,9 @@ export function normalizeDialog(dialog) {
         archived: Boolean(dialog.archived),
         unreadCount: dialog.unreadCount || 0,
         unreadMentionsCount: dialog.unreadMentionsCount || 0,
+        readInboxMaxId: dialog.dialog?.readInboxMaxId || dialog.readInboxMaxId || 0,
+        readOutboxMaxId: dialog.dialog?.readOutboxMaxId || dialog.readOutboxMaxId || 0,
+        topMessage: dialog.dialog?.topMessage || message?.id || 0,
         folderId: dialog.folderId || 0,
         date: dialog.date ? dialog.date * 1000 : (message?.date ? message.date * 1000 : Date.now()),
         isMuted: Boolean(dialog.dialog?.notifySettings?.muteUntil > 0),
@@ -86,9 +89,10 @@ export async function fetchDialogs(client, { limit = 100, archived } = {}) {
  * Фильтрует список диалогов по выбранной категории.
  * @param {Array<object>} dialogs
  * @param {"all"|"users"|"groups"|"channels"|"bots"|"unread"|"archived"} filterTab
+ * @param {string|null} [activeChatId=null] ID активного чата (не исключается из вкладки непрочитанных)
  * @returns {Array<object>}
  */
-export function filterDialogsByTab(dialogs, filterTab = "all") {
+export function filterDialogsByTab(dialogs, filterTab = "all", activeChatId = null) {
     if (!dialogs) return [];
 
     switch (filterTab) {
@@ -101,7 +105,7 @@ export function filterDialogsByTab(dialogs, filterTab = "all") {
         case "bots":
             return dialogs.filter((d) => !d.archived && d.type === "bot");
         case "unread":
-            return dialogs.filter((d) => !d.archived && (d.unreadCount > 0 || d.unreadMentionsCount > 0));
+            return dialogs.filter((d) => !d.archived && (d.unreadCount > 0 || d.unreadMentionsCount > 0 || (activeChatId && d.id === activeChatId)));
         case "archived":
             return dialogs.filter((d) => d.archived);
         case "all":

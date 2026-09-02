@@ -68,6 +68,7 @@ function buildTheme(p) {
             outgoingName: p.green,
             time: p.dim,
             dateDivider: p.yellow,
+            unreadDivider: p.accent,
             replyBorder: p.muted,
             systemMsg: p.yellow,
             mediaFg: p.magenta,

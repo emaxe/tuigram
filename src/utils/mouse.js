@@ -5,7 +5,7 @@
 import unicode from "neo-blessed/lib/unicode.js";
 
 /** Пиктограммы и эмодзи, занимающие две ячейки терминала. */
-const EMOJI_REGEX = /\p{Extended_Pictographic}/u;
+const EMOJI_REGEX = /\p{Extended_Pictographic}|[\u{1F000}-\u{1FAFF}]|[\u{2600}-\u{27BF}]/u;
 
 /**
  * Вычисляет ширину строки в терминальных ячейках.

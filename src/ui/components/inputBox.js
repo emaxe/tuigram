@@ -146,8 +146,10 @@ export function createInputBox(screen, theme, {
     });
 
     textarea.on("click", () => {
-        textarea.focus();
-        screen.render();
+        if (screen.focused !== textarea) {
+            textarea.focus();
+            screen.render();
+        }
     });
 
     textarea.key(["enter"], () => {
@@ -230,7 +232,9 @@ export function createInputBox(screen, theme, {
                 textarea.setValue(target.text);
             }
             renderContext();
-            textarea.focus();
+            if (screen.focused !== textarea) {
+                textarea.focus();
+            }
         },
         /**
          * Текущий режим ввода — нужен, чтобы отправить файл ответом.
@@ -246,7 +250,11 @@ export function createInputBox(screen, theme, {
             textarea.setValue("");
             screen.render();
         },
-        focus: () => textarea.focus(),
+        focus: () => {
+            if (screen.focused !== textarea) {
+                textarea.focus();
+            }
+        },
         /**
          * Завершает режим ввода, отдавая фокус предыдущей панели.
          * Нужно вызывать перед открытием модального окна: иначе textarea по blur

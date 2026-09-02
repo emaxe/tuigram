@@ -45,7 +45,7 @@ class AppState extends EventEmitter {
      * @returns {Array<object>}
      */
     getVisibleDialogs() {
-        const tabFiltered = filterDialogsByTab(this.dialogs, this.currentFilterTab);
+        const tabFiltered = filterDialogsByTab(this.dialogs, this.currentFilterTab, this.activeChat?.id);
         if (!this.searchQuery) return tabFiltered;
         return searchDialogs(tabFiltered, this.searchQuery);
     }
@@ -97,11 +97,32 @@ class AppState extends EventEmitter {
         this.replyTarget = null;
         this.editTarget = null;
         this.selectedMessageIndex = -1;
-        if (dialog) {
-            dialog.unreadCount = 0;
-            dialog.unreadMentionsCount = 0;
-        }
         this.emit("active_chat_changed", dialog);
+    }
+
+    /**
+     * Обновляет счётчик непрочитанных сообщений и максимальный прочитанный ID диалога.
+     * @param {string} chatId
+     * @param {number} unreadCount
+     * @param {number} [readInboxMaxId]
+     */
+    updateDialogUnread(chatId, unreadCount, readInboxMaxId) {
+        const dialog = this.dialogs.find((d) => d.id === chatId);
+        if (!dialog) return;
+
+        const countChanged = dialog.unreadCount !== unreadCount;
+        const idChanged = typeof readInboxMaxId === "number" && readInboxMaxId > (dialog.readInboxMaxId || 0);
+
+        if (countChanged || idChanged) {
+            dialog.unreadCount = Math.max(0, unreadCount);
+            if (dialog.unreadCount === 0) {
+                dialog.unreadMentionsCount = 0;
+            }
+            if (idChanged) {
+                dialog.readInboxMaxId = readInboxMaxId;
+            }
+            this.emit("dialogs_updated", this.getVisibleDialogs());
+        }
     }
 
     /**
@@ -117,9 +138,11 @@ class AppState extends EventEmitter {
      * Устанавливает или дополняет список сообщений для чата.
      * @param {string} chatId
      * @param {Array<object>} newMessages
-     * @param {boolean} [prepend=false] Если true — добавляет старые сообщения в начало
+     * @param {boolean|object} [options=false] Если true — добавляет старые сообщения в начало
      */
-    setMessages(chatId, newMessages, prepend = false) {
+    setMessages(chatId, newMessages, options = false) {
+        const prepend = typeof options === "boolean" ? options : Boolean(options?.prepend);
+        const firstUnreadId = typeof options === "object" ? (options?.firstUnreadId || null) : null;
         const existing = this.messagesByChat.get(chatId) || [];
         let combined = [];
 
@@ -140,7 +163,7 @@ class AppState extends EventEmitter {
         combined.sort((a, b) => (a.date || 0) - (b.date || 0) || (a.id - b.id));
 
         this.messagesByChat.set(chatId, combined);
-        this.emit("messages_updated", { chatId, messages: combined, isPrepend: prepend, isUpdate: false });
+        this.emit("messages_updated", { chatId, messages: combined, isPrepend: prepend, isUpdate: false, firstUnreadId });
     }
 
     /**

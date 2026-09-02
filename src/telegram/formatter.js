@@ -70,7 +70,7 @@ export function setMessagePalette(theme) {
  */
 export function escapeBlessed(text) {
     if (!text) return "";
-    return String(text).replace(/\{/g, "\\{").replace(/\}/g, "\\}");
+    return String(text).replace(/[{}]/g, (ch) => (ch === "{" ? "{open}" : "{close}"));
 }
 
 /**

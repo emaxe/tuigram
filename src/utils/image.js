@@ -6,6 +6,7 @@
 
 import jpegJs from "jpeg-js";
 import { PNG } from "pngjs";
+import { stringCellWidth } from "./mouse.js";
 
 /** Заголовок стандартного JPEG для распаковки Telegram PhotoStrippedSize. */
 const JPEG_HEADER = Buffer.from([
@@ -216,6 +217,9 @@ export function resizeRgba(src, srcW, srcH, dstW, dstH) {
     return dst;
 }
 
+/** Таблица предвычисленных двухсимвольных hex-значений 00-ff для быстрого рендеринга. */
+const HEX_TABLE = Array.from({ length: 256 }, (_, i) => (i < 16 ? "0" : "") + i.toString(16));
+
 /**
  * Преобразует компоненты цвета R, G, B в hex-строку вида "#rrggbb".
  * @param {number} r
@@ -224,10 +228,7 @@ export function resizeRgba(src, srcW, srcH, dstW, dstH) {
  * @returns {string}
  */
 export function rgbaToHex(r, g, b) {
-    const hexR = (r < 16 ? "0" : "") + r.toString(16);
-    const hexG = (g < 16 ? "0" : "") + g.toString(16);
-    const hexB = (b < 16 ? "0" : "") + b.toString(16);
-    return `#${hexR}${hexG}${hexB}`;
+    return `#${HEX_TABLE[r & 0xff]}${HEX_TABLE[g & 0xff]}${HEX_TABLE[b & 0xff]}`;
 }
 
 /**
@@ -258,8 +259,8 @@ export function rgbaToHalfBlockBlessed(data, width, height) {
             const topOffset = topRowOffset + x * 4;
             const botOffset = botRowOffset + x * 4;
 
-            const topHex = rgbaToHex(data[topOffset], data[topOffset + 1], data[topOffset + 2]);
-            const botHex = rgbaToHex(data[botOffset], data[botOffset + 1], data[botOffset + 2]);
+            const topHex = `#${HEX_TABLE[data[topOffset]]}${HEX_TABLE[data[topOffset + 1]]}${HEX_TABLE[data[topOffset + 2]]}`;
+            const botHex = `#${HEX_TABLE[data[botOffset]]}${HEX_TABLE[data[botOffset + 1]]}${HEX_TABLE[data[botOffset + 2]]}`;
 
             if (topHex !== currentFg) {
                 line += `{${topHex}-fg}`;
@@ -340,4 +341,307 @@ export function renderStrippedThumbnail(strippedBytes, { maxWidth = 36, maxHeigh
     } catch {
         return "";
     }
+}
+
+/**
+ * Извлекает исходные размеры медиа (ширину и высоту в пикселях) из объекта сообщения Telegram.
+ * @param {object} rawMessage исходное сообщение или объект медиа
+ * @returns {{ width: number, height: number }|null}
+ */
+export function getMediaDimensions(rawMessage) {
+    const media = rawMessage?.media || rawMessage;
+    if (!media) return null;
+
+    // 1. Фотография
+    if (media.className === "MessageMediaPhoto" || media.photo) {
+        const photo = media.photo || media;
+        let maxW = 0;
+        let maxH = 0;
+        for (const s of photo.sizes || []) {
+            if (s && typeof s.w === "number" && typeof s.h === "number" && s.w > 0 && s.h > 0) {
+                if (s.w * s.h > maxW * maxH) {
+                    maxW = s.w;
+                    maxH = s.h;
+                }
+            }
+        }
+        if (maxW > 0 && maxH > 0) {
+            return { width: maxW, height: maxH };
+        }
+    }
+
+    // 2. Документ (видео, изображение, gif)
+    if (media.className === "MessageMediaDocument" || media.document) {
+        const doc = media.document || media;
+        const attributes = doc.attributes || [];
+        for (const attr of attributes) {
+            if ((attr.className === "DocumentAttributeVideo" || attr.className === "DocumentAttributeImageSize") && attr.w && attr.h) {
+                return { width: attr.w, height: attr.h };
+            }
+        }
+        let maxW = 0;
+        let maxH = 0;
+        for (const t of doc.thumbs || []) {
+            if (t && typeof t.w === "number" && typeof t.h === "number" && t.w > 0 && t.h > 0) {
+                if (t.w * t.h > maxW * maxH) {
+                    maxW = t.w;
+                    maxH = t.h;
+                }
+            }
+        }
+        if (maxW > 0 && maxH > 0) {
+            return { width: maxW, height: maxH };
+        }
+    }
+
+    // 3. Веб-страница (встроенное медиа статьи/ссылки)
+    if (media.className === "MessageMediaWebPage" || media.webpage) {
+        const page = media.webpage || media;
+        if (page.photo) {
+            const dims = getMediaDimensions(page.photo);
+            if (dims) return dims;
+        }
+        if (page.document) {
+            const dims = getMediaDimensions(page.document);
+            if (dims) return dims;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Проверяет, является ли вложение визуальным медиа (фото, видео, анимация),
+ * для которого отображается визуальное превью в ленте сообщений.
+ * @param {object} rawMessage
+ * @returns {boolean}
+ */
+export function isPreviewableMedia(rawMessage) {
+    const media = rawMessage?.media || rawMessage;
+    if (!media) return false;
+
+    if (media.className === "MessageMediaPhoto" || media.photo) {
+        return true;
+    }
+
+    if (media.className === "MessageMediaDocument" || media.document) {
+        const doc = media.document || media;
+        if (typeof doc.mimeType === "string") {
+            if (doc.mimeType.startsWith("video/") || doc.mimeType.startsWith("image/")) {
+                return true;
+            }
+        }
+
+        const attributes = doc.attributes || [];
+        for (const attr of attributes) {
+            if (
+                attr.className === "DocumentAttributeVideo" ||
+                attr.className === "DocumentAttributeImageSize" ||
+                attr.className === "DocumentAttributeAnimated" ||
+                attr.className === "DocumentAttributeSticker"
+            ) {
+                return true;
+            }
+        }
+
+        if (Array.isArray(doc.thumbs) && doc.thumbs.length > 0) {
+            const isAudio = attributes.some((a) => a.className === "DocumentAttributeAudio");
+            if (!isAudio) {
+                return true;
+            }
+        }
+    }
+
+    if (media.className === "MessageMediaWebPage" || media.webpage) {
+        const page = media.webpage || media;
+        return Boolean(page.photo || (page.document && isPreviewableMedia(page.document)));
+    }
+
+    return false;
+}
+
+/** Цветовая палитра по умолчанию для прелоадера медиа-вложений. */
+const DEFAULT_PRELOADER_PALETTE = {
+    bg: "#1f2335",
+    border: "#3b4261",
+    fg: "#8288a6",
+    accent: "#7aa2f7",
+    dim: "#6874a0",
+};
+
+/**
+ * Генерирует строку Blessed-разметки для прелоадера / плейсхолдера медиа-вложения
+ * точного целевого размера, чтобы избежать скачков интерфейса и сдвигов сообщений
+ * при асинхронной подгрузке превью.
+ *
+ * @param {object} rawMessage исходное сообщение или объект медиа
+ * @param {object} [options]
+ * @param {number} [options.maxWidth=36]
+ * @param {number} [options.maxHeight=14]
+ * @param {string} [options.customLabel] пользовательская подпись
+ * @param {object} [options.palette] цвета темы (border, bg, fg, accent)
+ * @returns {string}
+ */
+export function renderMediaPreloader(rawMessage, {
+    maxWidth = 36,
+    maxHeight = 14,
+    customLabel,
+    palette,
+} = {}) {
+    const dims = getMediaDimensions(rawMessage);
+    const srcW = dims?.width || 320;
+    const srcH = dims?.height || 240;
+    const { dstW, rows } = calculateTargetDimensions(srcW, srcH, maxWidth, maxHeight);
+
+    const p = { ...DEFAULT_PRELOADER_PALETTE, ...(palette || {}) };
+
+    const media = rawMessage?.media || rawMessage;
+    const isDoc = media?.className === "MessageMediaDocument" || Boolean(media?.document);
+    const doc = media?.document || (isDoc ? media : null);
+    const attributes = doc?.attributes || [];
+
+    const isVideo = (typeof doc?.mimeType === "string" && doc.mimeType.startsWith("video/")) ||
+        attributes.some((a) => a?.className === "DocumentAttributeVideo");
+    const isGif = doc?.mimeType === "image/gif" ||
+        attributes.some((a) => a?.className === "DocumentAttributeAnimated");
+    const isSticker = attributes.some((a) => a?.className === "DocumentAttributeSticker");
+
+    // Определение длительности видео, если доступна
+    let duration = 0;
+    if (isVideo) {
+        const videoAttr = attributes.find((a) => a?.className === "DocumentAttributeVideo");
+        if (videoAttr?.duration) {
+            duration = videoAttr.duration;
+        }
+    }
+
+    // Подготовка текстовых меток
+    let primaryLabel = customLabel || "";
+    if (!primaryLabel) {
+        if (isVideo) {
+            primaryLabel = dstW >= 24 ? "⏳ Загрузка видео..." : (dstW >= 16 ? "⏳ Видео..." : "⏳ Видео");
+        } else if (isGif) {
+            primaryLabel = dstW >= 22 ? "⏳ Загрузка GIF..." : "⏳ GIF";
+        } else if (isSticker) {
+            primaryLabel = dstW >= 24 ? "⏳ Загрузка стикера..." : "⏳ Стикер";
+        } else {
+            primaryLabel = dstW >= 22 ? "⏳ Загрузка фото..." : (dstW >= 16 ? "⏳ Фото..." : "⏳ Фото");
+        }
+    }
+
+    let secondaryLabel = "";
+    if (duration > 0 && dims?.width && dims?.height) {
+        const minSec = `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, "0")}`;
+        secondaryLabel = dstW >= 22 ? `${minSec} · ${dims.width}×${dims.height}` : minSec;
+    } else if (duration > 0) {
+        secondaryLabel = `${Math.floor(duration / 60)}:${String(Math.floor(duration % 60)).padStart(2, "0")}`;
+    } else if (dims?.width && dims?.height) {
+        secondaryLabel = `${dims.width}×${dims.height}`;
+    }
+
+    const innerWidth = Math.max(1, dstW - 2);
+    const innerHeight = Math.max(1, rows - 2);
+
+    const borderTag = `{${p.border}-fg}`;
+    const borderClose = `{/${p.border}-fg}`;
+    const bgTag = p.bg ? `{${p.bg}-bg}` : "";
+    const bgClose = p.bg ? `{/${p.bg}-bg}` : "";
+    const textTag = `{${p.fg}-fg}`;
+    const textClose = `{/${p.fg}-fg}`;
+    const dimTag = `{${p.dim}-fg}`;
+    const dimClose = `{/${p.dim}-fg}`;
+
+    // Если места слишком мало для рамки (высота 1-2 строки)
+    if (rows <= 1) {
+        const line = `[ ${primaryLabel} ]`;
+        const pad = Math.max(0, dstW - stringCellWidth(line));
+        return `${bgTag}${textTag}${line}${" ".repeat(pad)}${textClose}${bgClose}`;
+    }
+
+    if (rows === 2) {
+        const topLine = `${borderTag}┌─ ${borderClose}${textTag}${primaryLabel}${textClose} ${borderTag}${"─".repeat(Math.max(0, innerWidth - stringCellWidth(primaryLabel) - 3))}┐${borderClose}`;
+        const botLine = `${borderTag}└${"─".repeat(innerWidth)}┘${borderClose}`;
+        return `${bgTag}${topLine}${bgClose}\n${bgTag}${botLine}${bgClose}`;
+    }
+
+    const lines = [];
+
+    // Верхняя граница
+    lines.push(`${bgTag}${borderTag}┌${"─".repeat(innerWidth)}┐${borderClose}${bgClose}`);
+
+    // Вычисление строки размещения подписей
+    const hasSecondary = Boolean(secondaryLabel) && innerHeight >= 3 && stringCellWidth(secondaryLabel) <= innerWidth;
+    const contentLinesCount = hasSecondary ? 2 : 1;
+    const startContentRow = Math.max(0, Math.floor((innerHeight - contentLinesCount) / 2));
+
+    for (let r = 0; r < innerHeight; r++) {
+        let content = "";
+        if (r === startContentRow) {
+            let label = primaryLabel;
+            if (stringCellWidth(label) > innerWidth) {
+                label = label.slice(0, Math.max(1, innerWidth - 1)) + "…";
+            }
+            const width = stringCellWidth(label);
+            const leftPad = Math.max(0, Math.floor((innerWidth - width) / 2));
+            const rightPad = Math.max(0, innerWidth - width - leftPad);
+            content = " ".repeat(leftPad) + textTag + label + textClose + " ".repeat(rightPad);
+        } else if (hasSecondary && r === startContentRow + 1) {
+            let label = secondaryLabel;
+            if (stringCellWidth(label) > innerWidth) {
+                label = label.slice(0, Math.max(1, innerWidth - 1));
+            }
+            const width = stringCellWidth(label);
+            const leftPad = Math.max(0, Math.floor((innerWidth - width) / 2));
+            const rightPad = Math.max(0, innerWidth - width - leftPad);
+            content = " ".repeat(leftPad) + dimTag + label + dimClose + " ".repeat(rightPad);
+        } else {
+            content = " ".repeat(innerWidth);
+        }
+
+        lines.push(`${bgTag}${borderTag}│${borderClose}${content}${borderTag}│${borderClose}${bgClose}`);
+    }
+
+    // Нижняя граница
+    lines.push(`${bgTag}${borderTag}└${"─".repeat(innerWidth)}┘${borderClose}${bgClose}`);
+
+    return lines.join("\n");
+}
+
+/**
+ * Извлекает готовое превью изображения из кэша по объекту сообщения, если оно уже рендерилось.
+ * @param {object} rawMessage
+ * @param {object} [options]
+ * @param {number} [options.maxWidth=36]
+ * @param {number} [options.maxHeight=14]
+ * @returns {string|null}
+ */
+export function getCachedImagePreview(rawMessage, { maxWidth = 36, maxHeight = 14 } = {}) {
+    const media = rawMessage?.media || rawMessage;
+    if (!media) return null;
+
+    const photo = media.photo || (media.className === "MessageMediaPhoto" ? media : null);
+    const doc = media.document || (media.className === "MessageMediaDocument" ? media : null);
+
+    const keysToCheck = [];
+    if (photo?.id) {
+        keysToCheck.push(`photo_${photo.id}@${maxWidth}x${maxHeight}`);
+        keysToCheck.push(`photo_full_${photo.id}@${maxWidth}x${maxHeight}`);
+    }
+    if (doc?.id) {
+        keysToCheck.push(`doc_${doc.id}@${maxWidth}x${maxHeight}`);
+        keysToCheck.push(`doc_full_${doc.id}@${maxWidth}x${maxHeight}`);
+    }
+    if (rawMessage?.id) {
+        keysToCheck.push(`msg_${rawMessage.id}@${maxWidth}x${maxHeight}`);
+        keysToCheck.push(`photo_full_${rawMessage.id}@${maxWidth}x${maxHeight}`);
+        keysToCheck.push(`doc_full_${rawMessage.id}@${maxWidth}x${maxHeight}`);
+    }
+
+    for (const key of keysToCheck) {
+        if (imagePreviewCache.has(key)) {
+            return imagePreviewCache.get(key);
+        }
+    }
+
+    return null;
 }

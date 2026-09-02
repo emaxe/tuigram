@@ -57,6 +57,7 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
 - [Sending files and images](#-sending-files-and-images)
 - [Themes](#-themes)
 - [Inline image previews](#️-inline-image-previews)
+- [Video playback in pseudographics](#-video-playback-in-pseudographics)
 - [Proxy configuration](#-proxy-configuration)
 - [Command line usage (CLI)](#️-command-line-usage-cli)
 - [Project structure](#-project-structure)
@@ -72,17 +73,18 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
 - **A complete interactive TUI**:
   - Two-pane adaptive layout (dialog list on the left, history and input box on the right);
   - Keyboard and mouse control (left click selects a message, right click opens the action
-    menu, clicking an image opens it full screen, wheel scrolling);
+    menu, clicking an image opens it full screen, clicking a video plays it, wheel scrolling);
   - Chat categories: All, Direct messages, Groups, Channels, Bots, Unread;
   - Instant search and filtering of chats by title and `@username` (`/`);
   - Live typing indicator ("… is typing");
   - Colored rendering of Telegram entities (bold, italic, monospace code, URLs, mentions, spoilers);
   - High-resolution inline image previews (Unicode Half-Block `▀` pixel art);
+  - Terminal video and video note playback (Unicode Half-Block + synchronized audio);
   - Media attachment indicators (photo, video, document, voice, sticker, poll);
   - Message reactions (👍, 🔥, ❤️);
   - Infinite upward pagination of message history (`PageUp` / `Ctrl+U`);
   - Contextual quick-reply (`Ctrl+R`) and edit (`Ctrl+E`) modes;
-  - Modal windows: Help (`F1` / `?`), Chat info (`Ctrl+P`), Action menu (`Ctrl+A`), Send file (`Ctrl+O`).
+  - Modal windows: Help (`F1` / `?`), Chat info (`Ctrl+P`), Action menu (`Ctrl+A`), Send file (`Ctrl+O`), Full-screen image viewer, Video player.
 - **Standalone CLI mode**:
   - Send messages and files straight from the command line;
   - List dialogs and print chat history in the terminal;
@@ -472,6 +474,7 @@ TuiGram fully supports mouse interaction in terminals that support mouse reporti
 | **Left click** | **Message in the feed** | **Select the message — a `▌` bar marks it on the left** |
 | **Right click** | **Message in the feed** | **Open the action menu (reactions, reply, edit, download, delete)** |
 | **Left click** | **Image preview inside a message** | **Open the image full screen** |
+| **Left click** | **Video preview inside a message** | **Play video in modal player** |
 | Left click | Empty area of the feed | Focus the message feed |
 | Left click | Header logo 🚀 | Open Help window |
 | Left click | Header active chat title | Open Chat Info window |

@@ -181,7 +181,8 @@ export function rgb24ToHalfBlockBlessed(rgbData, width, height) {
 }
 
 /**
- * Запускает фоновый процесс ffmpeg для декодирования видео в сырые RGB24-кадры.
+ * Запускает фоновый процесс ffmpeg для декодирования видео в сырые RGB24-кадры
+ * и выполняет их синхронизированную по времени выдачу в колбэк onFrame.
  * @param {string} ffmpegPath
  * @param {string} videoPath
  * @param {object} options
@@ -216,8 +217,17 @@ export function spawnVideoPlayer(ffmpegPath, videoPath, {
     let child = null;
     let paused = false;
     let killed = false;
-    let frameIndex = 0;
+    let isEof = false;
+    let timer = null;
+
     let accumulator = Buffer.alloc(0);
+    const frameQueue = [];
+    let frameCounter = 0;
+    let displayedFrameIndex = -1;
+
+    let startTime = null;
+    let totalPausedTime = 0;
+    let pauseStartTime = 0;
 
     try {
         child = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "ignore"] });
@@ -226,58 +236,152 @@ export function spawnVideoPlayer(ffmpegPath, videoPath, {
         return { pause() {}, resume() {}, kill() {}, isPaused: () => false };
     }
 
-    child.stdout.on("data", (chunk) => {
+    const stdout = child.stdout;
+
+    stdout.on("data", (chunk) => {
         if (killed) return;
         accumulator = Buffer.concat([accumulator, chunk]);
 
         while (accumulator.length >= frameSize) {
             const frameBuf = accumulator.subarray(0, frameSize);
             accumulator = accumulator.subarray(frameSize);
-            frameIndex++;
+            frameQueue.push({ index: frameCounter++, buffer: frameBuf });
+        }
 
-            const text = rgb24ToHalfBlockBlessed(frameBuf, width, height);
-            onFrame?.(text, frameIndex);
+        // Ограничиваем очередь кадров (~2 секунды при 15 fps), чтобы не тратить память
+        if (frameQueue.length >= 30 && !stdout.isPaused()) {
+            stdout.pause();
         }
     });
 
     child.on("error", (err) => {
-        if (!killed) onError?.(err);
+        if (timer) {
+            clearInterval(timer);
+            timer = null;
+        }
+        try { stdout?.destroy(); } catch {}
+        if (!killed) {
+            onError?.(err);
+        }
     });
 
     child.on("close", () => {
-        if (!killed) onEnd?.();
+        isEof = true;
     });
+
+    function tick() {
+        if (killed || paused) return;
+
+        // Ждем получения первого кадра для точной синхронизации времени старта
+        if (startTime === null) {
+            if (frameQueue.length === 0) {
+                if (isEof) {
+                    if (timer) {
+                        clearInterval(timer);
+                        timer = null;
+                    }
+                    try { stdout?.destroy(); } catch {}
+                    onEnd?.();
+                }
+                return;
+            }
+            startTime = performance.now();
+        }
+
+        const now = performance.now();
+        const elapsed = (now - startTime - totalPausedTime) / 1000;
+        const targetFrameIndex = Math.floor(elapsed * fps);
+
+        if (targetFrameIndex > displayedFrameIndex) {
+            let frameToRender = null;
+
+            // Выбираем актуальный кадр и отбрасываем устаревшие, если рендеринг отстал от таймера
+            while (frameQueue.length > 0 && frameQueue[0].index <= targetFrameIndex) {
+                const item = frameQueue.shift();
+                if (item.index === targetFrameIndex || frameQueue.length === 0) {
+                    frameToRender = item;
+                }
+            }
+
+            if (frameToRender) {
+                displayedFrameIndex = frameToRender.index;
+                const text = rgb24ToHalfBlockBlessed(frameToRender.buffer, width, height);
+                onFrame?.(text, displayedFrameIndex + 1);
+            }
+
+            // Если в буфере освободилось место, возобновляем чтение stdout
+            if (frameQueue.length < 15 && stdout.isPaused()) {
+                stdout.resume();
+            }
+        }
+
+        // Проверяем окончание воспроизведения
+        if (isEof && frameQueue.length === 0) {
+            if (displayedFrameIndex >= frameCounter - 1) {
+                if (timer) {
+                    clearInterval(timer);
+                    timer = null;
+                }
+                try { stdout?.destroy(); } catch {}
+                onEnd?.();
+            }
+        }
+    }
+
+    timer = setInterval(tick, 10);
+    if (typeof timer.unref === "function") {
+        timer.unref();
+    }
 
     return {
         pause() {
-            if (!paused && child && !killed) {
+            if (!paused && !killed) {
                 paused = true;
-                try {
-                    child.kill("SIGSTOP");
-                } catch {
-                    // Игнорируем ошибку паузы
+                pauseStartTime = performance.now();
+                if (child && child.pid) {
+                    try {
+                        child.kill("SIGSTOP");
+                    } catch {
+                        // Игнорируем ошибку паузы
+                    }
                 }
             }
         },
         resume() {
-            if (paused && child && !killed) {
+            if (paused && !killed) {
                 paused = false;
-                try {
-                    child.kill("SIGCONT");
-                } catch {
-                    // Игнорируем ошибку возобновления
+                if (pauseStartTime > 0) {
+                    if (startTime !== null) {
+                        totalPausedTime += performance.now() - pauseStartTime;
+                    }
+                    pauseStartTime = 0;
+                }
+                if (child && child.pid) {
+                    try {
+                        child.kill("SIGCONT");
+                    } catch {
+                        // Игнорируем ошибку возобновления
+                    }
                 }
             }
         },
         kill() {
             killed = true;
             paused = false;
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+            }
+            try { stdout?.destroy(); } catch {}
             accumulator = Buffer.alloc(0);
+            frameQueue.length = 0;
             if (child) {
-                try {
-                    child.kill("SIGKILL");
-                } catch {
-                    // Игнорируем ошибку завершения
+                if (child.pid) {
+                    try {
+                        child.kill("SIGKILL");
+                    } catch {
+                        // Игнорируем ошибку завершения
+                    }
                 }
                 child = null;
             }
@@ -290,7 +394,7 @@ export function spawnVideoPlayer(ffmpegPath, videoPath, {
 
 /**
  * Запускает фоновое воспроизведение звука для видеофайла.
- * На macOS использует встроенный afplay, на других платформах — ffplay (если найден).
+ * На macOS использует встроенный afplay для нативных форматов, на других платформах — ffplay (если найден).
  * @param {string} videoPath
  * @param {object} [options]
  * @param {string} [options.ffplayPath]
@@ -301,33 +405,51 @@ export function spawnAudioPlayer(videoPath, { ffplayPath } = {}) {
     let paused = false;
     let killed = false;
 
+    const ext = path.extname(videoPath).toLowerCase();
+    const isDarwin = process.platform === "darwin";
+    const darwinNativeFormats = new Set([".mp4", ".mov", ".m4v", ".m4a", ".mp3", ".wav", ".aac", ".aiff"]);
+
     try {
-        if (process.platform === "darwin") {
+        if (isDarwin && darwinNativeFormats.has(ext)) {
             child = spawn("afplay", [videoPath], { stdio: "ignore" });
         } else if (ffplayPath) {
             child = spawn(ffplayPath, ["-nodisp", "-autoexit", "-loglevel", "error", "-i", videoPath], { stdio: "ignore" });
+        } else if (isDarwin) {
+            child = spawn("afplay", [videoPath], { stdio: "ignore" });
         }
     } catch {
         // Игнорируем ошибки запуска аудиоплеера
+    }
+
+    if (child) {
+        child.on("error", () => {
+            // Игнорируем ошибки аудиоплеера (например, отсутствие звуковой дорожки)
+        });
     }
 
     return {
         pause() {
             if (!paused && child && !killed) {
                 paused = true;
-                try { child.kill("SIGSTOP"); } catch {}
+                if (child.pid) {
+                    try { child.kill("SIGSTOP"); } catch {}
+                }
             }
         },
         resume() {
             if (paused && child && !killed) {
                 paused = false;
-                try { child.kill("SIGCONT"); } catch {}
+                if (child.pid) {
+                    try { child.kill("SIGCONT"); } catch {}
+                }
             }
         },
         kill() {
             killed = true;
             if (child) {
-                try { child.kill("SIGKILL"); } catch {}
+                if (child.pid) {
+                    try { child.kill("SIGKILL"); } catch {}
+                }
                 child = null;
             }
         }

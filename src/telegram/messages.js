@@ -2,7 +2,7 @@ import { Api, errors } from "teleproto";
 import { idToString, toMarkedId, getEntityDisplayName, entityCache, resolveEntity } from "./entities.js";
 import { describeMedia } from "./formatter.js";
 import { config } from "../config.js";
-import { renderStrippedThumbnail, renderImageBuffer } from "../utils/image.js";
+import { renderStrippedThumbnail, renderImageBuffer, renderMediaPreloader, getCachedImagePreview, isPreviewableMedia } from "../utils/image.js";
 
 const { FloodWaitError } = errors;
 
@@ -73,10 +73,32 @@ export function normalizeMessage(message) {
         }
     }
 
-    // Извлечение и рендеринг PhotoStrippedSize в псевдографику
-    const imagePreview = config.showImages
-        ? (renderMessageThumbnail(message) || null)
-        : null;
+    // Извлечение и рендеринг PhotoStrippedSize в псевдографику или прелоадера
+    let imagePreview = null;
+    let isPreviewLoading = false;
+
+    if (config.showImages && isPreviewableMedia(message)) {
+        const cached = getCachedImagePreview(message, {
+            maxWidth: config.imageMaxWidth,
+            maxHeight: config.imageMaxHeight,
+        });
+        if (cached) {
+            imagePreview = cached;
+            isPreviewLoading = false;
+        } else {
+            const strippedThumb = renderMessageThumbnail(message);
+            if (strippedThumb) {
+                imagePreview = strippedThumb;
+                isPreviewLoading = false;
+            } else {
+                imagePreview = renderMediaPreloader(message, {
+                    maxWidth: config.imageMaxWidth,
+                    maxHeight: config.imageMaxHeight,
+                });
+                isPreviewLoading = true;
+            }
+        }
+    }
 
     return {
         id: message.id,
@@ -94,6 +116,7 @@ export function normalizeMessage(message) {
         media: message.media || null,
         mediaDescription: describeMedia(message.media),
         imagePreview,
+        isPreviewLoading,
         entities: message.entities || [],
         reactions,
         rawMessage: message,
@@ -119,6 +142,9 @@ export async function fetchHistory(client, rawPeer, { limit = 40, offsetId = 0, 
             if (msg && msg.className !== "MessageEmpty") {
                 messages.push(normalizeMessage(msg));
             }
+        }
+        if (!reverse) {
+            messages.reverse();
         }
     };
 
@@ -287,6 +313,61 @@ export async function sendReaction(client, rawPeer, messageId, emoji = "👍") {
 }
 
 /**
+ * Находит первое непрочитанное входящее сообщение в хронологическом списке сообщений.
+ * @param {Array<object>} messages
+ * @param {object} [options]
+ * @param {number} [options.readInboxMaxId=0]
+ * @param {number} [options.unreadCount=0]
+ * @returns {object|null}
+ */
+export function findFirstUnreadMessage(messages, { readInboxMaxId = 0, unreadCount = 0 } = {}) {
+    if (!Array.isArray(messages) || messages.length === 0 || unreadCount === 0) {
+        return null;
+    }
+
+    // Всегда сортируем сообщения по возрастанию ID/даты перед поиском
+    const sorted = [...messages].sort((a, b) => (a.date || 0) - (b.date || 0) || (a.id - b.id));
+
+    if (readInboxMaxId > 0) {
+        const first = sorted.find((m) => !m.out && m.id > readInboxMaxId);
+        if (first) return first;
+    }
+
+    if (unreadCount > 0) {
+        const incoming = sorted.filter((m) => !m.out);
+        if (incoming.length > 0) {
+            const unreadIncoming = incoming.slice(-unreadCount);
+            return unreadIncoming[0] || null;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Вычисляет количество оставшихся непрочитанных сообщений в чате на основе прочитанного maxId.
+ * @param {Array<object>} messages
+ * @param {number} maxReadId
+ * @param {number} [totalUnreadCount]
+ * @returns {number}
+ */
+export function calculateRemainingUnreadCount(messages, maxReadId = 0, totalUnreadCount) {
+    if (!Array.isArray(messages) || messages.length === 0) return 0;
+
+    const unreadInLoaded = messages.filter((m) => !m.out && m.id > maxReadId).length;
+
+    if (typeof totalUnreadCount === "number" && totalUnreadCount > 0) {
+        const incomingInLoaded = messages.filter((m) => !m.out).length;
+        if (totalUnreadCount > incomingInLoaded) {
+            const notLoadedCount = totalUnreadCount - incomingInLoaded;
+            return notLoadedCount + unreadInLoaded;
+        }
+    }
+
+    return unreadInLoaded;
+}
+
+/**
  * Отмечает сообщения в чате прочитанными.
  * @param {import("teleproto").TelegramClient} client
  * @param {string|number|bigint} rawPeer
@@ -296,7 +377,7 @@ export async function markAsRead(client, rawPeer, maxId = 0) {
     const entity = await resolveEntity(client, rawPeer);
     try {
         if (maxId > 0) {
-            await client.sendReadAcknowledge(entity, { maxId });
+            await client.markAsRead(entity, maxId);
         } else {
             await client.markAsRead(entity);
         }
@@ -382,6 +463,9 @@ export async function loadMessageImagePreview(client, rawMessage, { maxWidth = c
     const isPhoto = media.className === "MessageMediaPhoto";
     const isDoc = media.className === "MessageMediaDocument";
     if (!isPhoto && !isDoc) return "";
+
+    const cached = getCachedImagePreview(rawMessage, { maxWidth, maxHeight });
+    if (cached) return cached;
 
     const cacheKey = isPhoto
         ? `photo_full_${media.photo?.id || rawMessage.id}`

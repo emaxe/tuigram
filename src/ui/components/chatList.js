@@ -1,10 +1,140 @@
 import blessed from "neo-blessed";
 import { formatChatTime } from "../../utils/time.js";
 import { escapeBlessed } from "../../telegram/formatter.js";
-import { fg, badge } from "../theme.js";
+import { fg, badge, getTheme } from "../theme.js";
 import unicode from "neo-blessed/lib/unicode.js";
-
 import { getTabByCoordinate, isRightClick } from "../../utils/mouse.js";
+
+/** Пиктограммы и эмодзи, занимающие две ячейки терминала. */
+const WIDE_CHAR = /\p{Extended_Pictographic}|[\u{1F000}-\u{1FAFF}]|[\u{2600}-\u{27BF}]/u;
+
+/**
+ * Ширина строки в ячейках терминала по той же модели, которой пользуется
+ * blessed при отрисовке. Считать через .length нельзя: эмодзи занимают
+ * две ячейки, а в UTF-16 это одна-две единицы — из-за расхождения строка
+ * вылезала за край, blessed резал её посреди бейджа непрочитанных и хвост
+ * оставался залит фоном бейджа.
+ * @param {string} text
+ * @returns {number}
+ */
+export function cellWidth(text) {
+    if (!text) return 0;
+    let width = 0;
+    for (const char of text) {
+        const byBlessed = unicode.strWidth(char);
+        // Эмодзи терминал рисует в две ячейки, а blessed считает их за одну.
+        // Берём максимум: бюджет должен быть верен для обеих моделей, иначе
+        // строка вылезает за край в реальном терминале.
+        width += WIDE_CHAR.test(char) ? Math.max(2, byBlessed) : byBlessed;
+    }
+    return width;
+}
+
+/**
+ * Обрезает строку до заданной ширины в ячейках терминала с добавлением многоточия.
+ * @param {string} text
+ * @param {number} maxCells
+ * @returns {string}
+ */
+export function truncate(text, maxCells) {
+    if (maxCells <= 0) return "";
+    if (cellWidth(text) <= maxCells) return text;
+    if (maxCells === 1) return "…";
+
+    let width = 0;
+    let result = "";
+    for (const char of text) {
+        const charCells = cellWidth(char);
+        if (width + charCells > maxCells - 1) break;
+        width += charCells;
+        result += char;
+    }
+    return `${result}…`;
+}
+
+/**
+ * Форматирует элемент диалога в одну строку фиксированной ширины.
+ * Бейдж непрочитанных сообщений и время всегда прижаты максимально вправо
+ * в единой ровной колонке, а название диалога и превью сообщения обрезаются
+ * при нехватке места.
+ * @param {object} d данные диалога
+ * @param {number} width доступная ширина строки в ячейках
+ * @param {object} [theme] активная тема оформления
+ * @returns {string}
+ */
+export function formatDialogItem(d, width, theme = getTheme("default")) {
+    const totalWidth = width || 40;
+    const pinIcon = d.pinned ? "📌 " : "";
+    const typeIcon =
+        d.type === "channel" ? "📢 " :
+        d.type === "supergroup" || d.type === "group" ? "👥 " :
+        d.type === "bot" ? "🤖 " :
+        d.type === "saved" ? "⭐ " : "👤 ";
+
+    const timeStr = formatChatTime(d.date);
+    const unreadCount = Number(d.unreadCount) || 0;
+    const hasUnread = unreadCount > 0;
+    const unreadStr = hasUnread ? (unreadCount > 99 ? "[99+]" : `[${unreadCount}]`) : "";
+
+    // 1. Формируем правый блок: время и бейдж непрочитанных (при наличии)
+    let rightPart = "";
+    let rightCells = 0;
+
+    if (hasUnread) {
+        const badgeEl = badge(theme.chatList.itemUnreadBg, theme.chatList.itemUnreadFg, `{bold}${unreadStr}{/bold}`);
+        if (timeStr) {
+            rightPart = `${fg(theme.chatList.timeFg, timeStr)} ${badgeEl}`;
+            rightCells = cellWidth(timeStr) + 1 + cellWidth(unreadStr);
+        } else {
+            rightPart = badgeEl;
+            rightCells = cellWidth(unreadStr);
+        }
+    } else if (timeStr) {
+        rightPart = fg(theme.chatList.timeFg, timeStr);
+        rightCells = cellWidth(timeStr);
+    }
+
+    // 2. Рассчитываем доступную ширину для левой части
+    const maxLeftCells = Math.max(0, totalWidth - rightCells - (rightCells > 0 ? 1 : 0));
+    const prefix = `${pinIcon}${typeIcon}`;
+    const prefixCells = cellWidth(prefix);
+    const maxContentCells = Math.max(0, maxLeftCells - prefixCells);
+
+    const rawTitle = d.title || "Чат";
+    const rawPreview = (d.lastMessage?.text || "").replace(/\s+/g, " ").trim();
+
+    let title = "";
+    let preview = "";
+
+    if (cellWidth(rawTitle) > maxContentCells) {
+        // Название не вмещается полностью — обрезаем с троеточием, превью опускаем
+        title = truncate(rawTitle, maxContentCells);
+    } else {
+        // Название вместилось полностью
+        title = rawTitle;
+        const remainingForPreview = maxContentCells - cellWidth(title);
+        // " · " занимает 3 ячейки, поэтому для текста превью нужно хотя бы ещё 3 ячейки
+        if (rawPreview && remainingForPreview >= 6) {
+            preview = truncate(rawPreview, remainingForPreview - 3);
+        }
+    }
+
+    const previewPart = preview
+        ? ` ${fg(theme.chatList.previewFg, `· ${escapeBlessed(preview)}`)}`
+        : "";
+    const titlePart = d.pinned
+        ? fg(theme.chatList.pinnedFg, `{bold}${escapeBlessed(title)}{/bold}`)
+        : `{bold}${escapeBlessed(title)}{/bold}`;
+
+    const leftPart = `${prefix}${titlePart}${previewPart}`;
+    const leftCells = prefixCells + cellWidth(title) + (preview ? 3 + cellWidth(preview) : 0);
+
+    // 3. Выравнивание: дополняем пробелами, чтобы правый блок был прижат к правому краю
+    const paddingCells = Math.max(rightCells > 0 && leftCells > 0 ? 1 : 0, totalWidth - leftCells - rightCells);
+    const padding = " ".repeat(paddingCells);
+
+    return `${leftPart}${padding}${rightPart}`;
+}
 
 /**
  * Создаёт компонент списка диалогов (левая панель).
@@ -50,9 +180,6 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
             fg: theme.tabs.fg,
         },
     });
-
-    /** Пиктограммы, которые терминал рисует в две ячейки. */
-    const EMOJI = /\p{Extended_Pictographic}/u;
 
     const TAB_KEYS = ["all", "users", "groups", "channels", "bots", "unread"];
     const TAB_NAMES = ["1:Все", "2:ЛС", "3:Группы", "4:Каналы", "5:Боты", "6:Непроч"];
@@ -102,7 +229,9 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
         if (searchBox.getValue() === SEARCH_PLACEHOLDER) {
             searchBox.setValue("");
         }
-        searchBox.focus();
+        if (screen.focused !== searchBox) {
+            searchBox.focus();
+        }
         screen.render();
     });
 
@@ -173,98 +302,22 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
     let currentDialogs = [];
 
     /**
-     * Ширина строки в ячейках терминала по той же модели, которой пользуется
-     * blessed при отрисовке. Считать через .length нельзя: эмодзи занимают
-     * две ячейки, а в UTF-16 это одна-две единицы — из-за расхождения строка
-     * вылезала за край, blessed резал её посреди бейджа непрочитанных и хвост
-     * оставался залит фоном бейджа.
-     * @param {string} text
+     * Вычисляет реальную доступную ширину для элемента списка диалогов.
      * @returns {number}
      */
-    function cellWidth(text) {
-        let width = 0;
-        for (const char of text) {
-            const byBlessed = unicode.strWidth(char);
-            // Эмодзи терминал рисует в две ячейки, а blessed считает их за одну.
-            // Берём максимум: бюджет должен быть верен для обеих моделей, иначе
-            // строка вылезает за край в реальном терминале.
-            width += EMOJI.test(char) ? Math.max(2, byBlessed) : byBlessed;
+    function getAvailableWidth() {
+        let w = 0;
+        if (typeof list.width === "number" && list.width > 0) {
+            // list.width — ширина списка внутри рамки контейнера; -1 на полосу скроллбара
+            w = list.width - 1;
+        } else if (typeof container.width === "number" && container.width > 0) {
+            // container.width: -2 рамка, -1 скроллбар
+            w = container.width - 3;
+        } else if (screen?.cols > 0) {
+            // Контейнер 35% от экрана: -2 рамка, -1 скроллбар
+            w = Math.floor(screen.cols * 0.35) - 3;
         }
-        return width;
-    }
-
-    /**
-     * Обрезает строку до заданной ширины В ЯЧЕЙКАХ, добавляя многоточие.
-     * @param {string} text
-     * @param {number} maxCells
-     * @returns {string}
-     */
-    function truncate(text, maxCells) {
-        if (maxCells <= 1) return "";
-        if (cellWidth(text) <= maxCells) return text;
-
-        let width = 0;
-        let result = "";
-        for (const char of text) {
-            const charCells = cellWidth(char);
-            if (width + charCells > maxCells - 1) break;
-            width += charCells;
-            result += char;
-        }
-        return `${result}…`;
-    }
-
-    /**
-     * Форматирует элемент диалога в ОДНУ строку.
-     * blessed.list жёстко задаёт элементам height: 1, поэтому любой перевод строки
-     * в содержимом теряется без предупреждения.
-     * @param {object} d
-     * @param {number} width доступная ширина строки в символах
-     * @returns {string}
-     */
-    function formatDialogItem(d, width) {
-        const pinIcon = d.pinned ? "📌 " : "";
-        const typeIcon =
-            d.type === "channel" ? "📢 " :
-            d.type === "supergroup" || d.type === "group" ? "👥 " :
-            d.type === "bot" ? "🤖 " :
-            d.type === "saved" ? "⭐ " : "👤 ";
-
-        const timeStr = formatChatTime(d.date);
-        const unreadStr = d.unreadCount > 0 ? ` [${d.unreadCount}]` : "";
-
-        // Всё меряем в ячейках терминала: иконки — это эмодзи переменной ширины
-        const fixedCells =
-            cellWidth(pinIcon) + cellWidth(typeIcon) + cellWidth(timeStr) + cellWidth(unreadStr) + 2;
-        const available = Math.max(10, (width || 40) - fixedCells);
-
-        const rawTitle = d.title || "Чат";
-        const rawPreview = (d.lastMessage?.text || "").replace(/\s+/g, " ").trim();
-
-        // Название важнее превью: оно получает до 60% ширины (но не меньше 16 ячеек)
-        // и никогда не больше доступного места — иначе строка вылезет за край и
-        // бейдж непрочитанных обрежется. Превью занимает остаток и на узких
-        // терминалах просто исчезает.
-        const titleMax = Math.min(
-            cellWidth(rawTitle),
-            available,
-            Math.max(16, Math.floor(available * 0.6))
-        );
-        const title = truncate(rawTitle, titleMax);
-        const previewMax = available - cellWidth(title) - 3;
-        const preview = previewMax >= 6 ? truncate(rawPreview, previewMax) : "";
-
-        const unreadBadge = unreadStr
-            ? ` ${badge(theme.chatList.itemUnreadBg, theme.chatList.itemUnreadFg, `{bold}${unreadStr}{/bold}`)}`
-            : "";
-        const previewPart = preview
-            ? ` ${fg(theme.chatList.previewFg, `· ${escapeBlessed(preview)}`)}`
-            : "";
-        const titlePart = d.pinned
-            ? fg(theme.chatList.pinnedFg, `{bold}${escapeBlessed(title)}{/bold}`)
-            : `{bold}${escapeBlessed(title)}{/bold}`;
-
-        return `${pinIcon}${typeIcon}${titlePart}${previewPart} ${fg(theme.chatList.timeFg, timeStr)}${unreadBadge}`;
+        return Math.max(10, w || 32);
     }
 
     /**
@@ -273,14 +326,17 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
      */
     function setDialogs(dialogs) {
         currentDialogs = dialogs;
-        // Элементы списка живут внутри list и ещё на колонку уже из-за скроллбара
-        // -1 колонка скроллбара, -1 запас: при подсчёте переноса blessed
-        // прибавляет к ширине часть символов разметки
-        const width = Math.max(10, list.width - 2);
-        const items = dialogs.map((d) => formatDialogItem(d, width));
+        const width = getAvailableWidth();
+        const items = dialogs.map((d) => formatDialogItem(d, width, theme));
         list.setItems(items);
         screen.render();
     }
+
+    screen.on("resize", () => {
+        if (currentDialogs.length > 0) {
+            setDialogs(currentDialogs);
+        }
+    });
 
     // Обработка выбора диалога
     list.on("select", (item, index) => {

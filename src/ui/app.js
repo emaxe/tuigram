@@ -18,13 +18,14 @@ import { state } from "../state.js";
 import { config } from "../config.js";
 import { fetchDialogs } from "../telegram/dialogs.js";
 import { setMessagePalette } from "../telegram/formatter.js";
-import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead, loadMessageImagePreview, downloadImageBuffer, renderMessageThumbnail } from "../telegram/messages.js";
+import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead, loadMessageImagePreview, downloadImageBuffer, renderMessageThumbnail, findFirstUnreadMessage, calculateRemainingUnreadCount } from "../telegram/messages.js";
 import { startTelegramListener } from "../telegram/listener.js";
 import { logout } from "../telegram/auth.js";
 import { ensureDir, inspectLocalFile } from "../utils/storage.js";
 import { formatFileSize } from "../utils/time.js";
 import { parseSendFileArgs } from "../utils/commands.js";
 import { isRightClick } from "../utils/mouse.js";
+import { renderMediaPreloader } from "../utils/image.js";
 
 /**
  * Запускает полноэкранный TUI-клиент Telegram.
@@ -39,7 +40,10 @@ export async function startTui(client, me) {
     let listener = null;
     const screen = createScreen({
         theme,
-        onExit: () => listener?.stop(),
+        onExit: () => {
+            flushPendingMarkAsRead();
+            listener?.stop();
+        },
     });
 
     state.me = me;
@@ -113,6 +117,7 @@ export async function startTui(client, me) {
         onQuit: () => {
             releaseInputs();
             confirmModal.ask("Выйти из TuiGram?", () => {
+                flushPendingMarkAsRead();
                 listener?.stop();
                 screen.destroy();
                 process.exit(0);
@@ -130,11 +135,21 @@ export async function startTui(client, me) {
 
     const imageViewerModal = createImageViewerModal(screen, theme, {
         onLoadFullImage: (msg) => downloadImageBuffer(client, msg.rawMessage),
-        // Пока качается оригинал, показываем встроенную в сообщение миниатюру
+        // Пока качается оригинал, показываем встроенную в сообщение миниатюру или прелоадер
         onRenderPlaceholder: (msg, size) => renderMessageThumbnail(msg.rawMessage, {
             maxWidth: size.maxWidth,
             maxHeight: size.maxHeight,
             useCache: false,
+        }) || renderMediaPreloader(msg.rawMessage, {
+            maxWidth: size.maxWidth,
+            maxHeight: size.maxHeight,
+            palette: {
+                bg: theme.surface,
+                border: theme.borders.fg,
+                fg: theme.fg,
+                accent: theme.accent,
+                dim: theme.dim,
+            },
         }),
     });
 
@@ -166,6 +181,16 @@ export async function startTui(client, me) {
             maxWidth: size.maxWidth,
             maxHeight: size.maxHeight,
             useCache: false,
+        }) || renderMediaPreloader(msg.rawMessage, {
+            maxWidth: size.maxWidth,
+            maxHeight: size.maxHeight,
+            palette: {
+                bg: theme.surface,
+                border: theme.borders.fg,
+                fg: theme.fg,
+                accent: theme.accent,
+                dim: theme.dim,
+            },
         }),
     });
 
@@ -236,20 +261,62 @@ export async function startTui(client, me) {
         },
     });
 
+    let readDebounceTimer = null;
+    let pendingReadMaxId = 0;
+    let pendingReadPeerId = null;
+
+    /**
+     * Отправляет подтверждение прочтения на сервер с дебаунсом, чтобы не спамить сеть при скролле.
+     * @param {string|number|bigint} peerId
+     * @param {number} maxId
+     */
+    function debouncedMarkAsRead(peerId, maxId) {
+        pendingReadPeerId = peerId;
+        if (maxId > pendingReadMaxId) {
+            pendingReadMaxId = maxId;
+        }
+        if (readDebounceTimer) clearTimeout(readDebounceTimer);
+        readDebounceTimer = setTimeout(() => {
+            flushPendingMarkAsRead();
+        }, 300);
+    }
+
+    /** Сбрасывает накопленный маркер прочтения на сервер без задержки. */
+    function flushPendingMarkAsRead() {
+        if (readDebounceTimer) {
+            clearTimeout(readDebounceTimer);
+            readDebounceTimer = null;
+        }
+        if (pendingReadPeerId && pendingReadMaxId > 0) {
+            const peer = pendingReadPeerId;
+            const id = pendingReadMaxId;
+            pendingReadPeerId = null;
+            pendingReadMaxId = 0;
+            markAsRead(client, peer, id).catch(() => {});
+        }
+    }
+
     // 2. Список диалогов (левая панель)
     const chatList = createChatList(screen, theme, {
         onSelectDialog: async (dialog) => {
+            flushPendingMarkAsRead();
             state.setActiveChat(dialog);
+            chatView.resetReadState(dialog.readInboxMaxId || 0);
             statusBar.showMessage(`Загрузка сообщений: ${dialog.title}...`, "info");
 
             try {
-                const history = await fetchHistory(client, dialog.peerId, { limit: 50 });
-                state.setMessages(dialog.id, history.messages);
-                markAsRead(client, dialog.peerId).catch(() => {});
+                // Загружаем всю пачку непрочитанных сообщений + запас из 20 прочитанных
+                // для контекста и правильного позиционирования разделителя
+                const limit = Math.max(50, Math.min(1000, (dialog.unreadCount || 0) + 20));
+                const history = await fetchHistory(client, dialog.peerId, { limit });
+                if (state.activeChat?.id !== dialog.id) return;
+                const firstUnread = findFirstUnreadMessage(history.messages, dialog);
+                state.setMessages(dialog.id, history.messages, { firstUnreadId: firstUnread?.id || null });
                 statusBar.showMessage(`Чат: ${dialog.title}`, "info");
-                fetchMissingImagePreviews(history.messages, dialog.id);
             } catch (err) {
-                statusBar.showMessage(`Ошибка загрузки: ${err.message}`, "error");
+                if (state.activeChat?.id === dialog.id) {
+                    statusBar.showMessage(`Ошибка загрузки: ${err.message}`, "error");
+                }
             }
         },
         onTabChange: (tab) => {
@@ -277,7 +344,6 @@ export async function startTui(client, me) {
                 if (older.messages.length > 0) {
                     state.setMessages(state.activeChat.id, older.messages, true);
                     statusBar.showMessage(`Загружено ${older.messages.length} предыдущих сообщений`, "info");
-                    fetchMissingImagePreviews(older.messages, state.activeChat.id);
                 }
             } catch (err) {
                 statusBar.showMessage(`Ошибка пагинации: ${err.message}`, "error");
@@ -304,6 +370,19 @@ export async function startTui(client, me) {
             videoPlayerModal.play(msg);
         },
         onFocusRequest: () => releaseInputs(),
+        onMessagesRead: (maxVisibleId) => {
+            if (!state.activeChat) return;
+            const chatId = state.activeChat.id;
+            const dialog = state.dialogs.find((d) => d.id === chatId);
+            const messages = state.getMessages(chatId);
+            const remainingCount = calculateRemainingUnreadCount(messages, maxVisibleId, dialog?.unreadCount);
+            state.updateDialogUnread(chatId, remainingCount, maxVisibleId);
+            debouncedMarkAsRead(state.activeChat.peerId, maxVisibleId);
+        },
+        onVisibleMessagesChanged: (visibleMsgs) => {
+            if (!state.activeChat) return;
+            fetchMissingImagePreviews(visibleMsgs, state.activeChat.id);
+        },
     });
 
     // 4. Поле ввода (нижняя панель)
@@ -451,6 +530,7 @@ export async function startTui(client, me) {
     });
 
     state.on("active_chat_changed", (chat) => {
+        activePreviewLoads.clear();
         header.updateInfo({
             me: state.me,
             status: state.connectionStatus,
@@ -459,16 +539,29 @@ export async function startTui(client, me) {
         });
         const msgs = chat ? state.getMessages(chat.id) : [];
         chatView.setSelected(null);
-        chatView.setMessages(msgs);
+        if (chat && msgs.length > 0) {
+            const firstUnread = findFirstUnreadMessage(msgs, chat);
+            if (firstUnread) {
+                chatView.setMessages(msgs, { firstUnreadId: firstUnread.id, autoScrollToBottom: false });
+            } else {
+                chatView.setMessages(msgs, true);
+            }
+        } else {
+            chatView.setMessages([], false);
+        }
     });
 
-    state.on("messages_updated", ({ chatId, messages, isPrepend, isUpdate, isNewMessage }) => {
+    state.on("messages_updated", ({ chatId, messages, isPrepend, isUpdate, isNewMessage, firstUnreadId }) => {
         if (state.activeChat?.id === chatId) {
-            // Скроллим в самый низ только если это новое сообщение или первая загрузка чата.
-            // При подгрузке старых сообщений (isPrepend) или фоновых обновлениях (isUpdate)
-            // позиция скролла сохраняется!
-            const shouldScrollToBottom = isNewMessage ? config.autoScroll : (!isPrepend && !isUpdate);
-            chatView.setMessages(messages, shouldScrollToBottom);
+            if (firstUnreadId) {
+                chatView.setMessages(messages, { firstUnreadId, autoScrollToBottom: false });
+            } else {
+                // Скроллим в самый низ только если это новое сообщение или первая загрузка чата.
+                // При подгрузке старых сообщений (isPrepend) или фоновых обновлениях (isUpdate)
+                // позиция скролла сохраняется!
+                const shouldScrollToBottom = isNewMessage ? config.autoScroll : (!isPrepend && !isUpdate);
+                chatView.setMessages(messages, shouldScrollToBottom);
+            }
         }
     });
 
@@ -491,30 +584,63 @@ export async function startTui(client, me) {
         }
     });
 
+    let previewBatchTimer = null;
+    let pendingBatchChatId = null;
+
     /**
-     * Фоново догружает превью изображений для сообщений, не имевших встроенного PhotoStrippedSize.
+     * Планирует пакетное обновление интерфейса после догрузки группы превью.
+     * @param {string} chatId
+     */
+    function scheduleBatchPreviewUpdate(chatId) {
+        if (state.activeChat?.id !== chatId) return;
+        pendingBatchChatId = chatId;
+        if (previewBatchTimer) return;
+        previewBatchTimer = setTimeout(() => {
+            previewBatchTimer = null;
+            if (state.activeChat?.id === pendingBatchChatId) {
+                const current = state.getMessages(pendingBatchChatId);
+                state.emit("messages_updated", {
+                    chatId: pendingBatchChatId,
+                    messages: current,
+                    isPrepend: false,
+                    isUpdate: true,
+                });
+            }
+            pendingBatchChatId = null;
+        }, 150);
+    }
+
+    /** Множество ID сообщений, для которых прямо сейчас выполняется загрузка превью. */
+    const activePreviewLoads = new Set();
+
+    /**
+     * Фоново догружает превью изображений только для тех сообщений, которые видны на экране (Lazy Loading).
+     * Обновления группируются пакетами, предотвращая фризы и блокировку основного потока.
      * @param {Array<object>} messages
      * @param {string} chatId
      */
     async function fetchMissingImagePreviews(messages, chatId) {
         if (!config.showImages || !messages || messages.length === 0) return;
-        for (const msg of messages) {
+        const toFetch = messages.filter((m) => m.isPreviewLoading && m.rawMessage && !activePreviewLoads.has(m.id));
+        if (toFetch.length === 0) return;
+
+        for (const msg of toFetch) {
             if (state.activeChat?.id !== chatId) break;
-            if (msg.media && !msg.imagePreview && msg.rawMessage) {
-                const isPhoto = msg.media.className === "MessageMediaPhoto";
-                const isDoc = msg.media.className === "MessageMediaDocument";
-                if (isPhoto || isDoc) {
-                    try {
-                        const preview = await loadMessageImagePreview(client, msg.rawMessage);
-                        if (preview && state.activeChat?.id === chatId) {
-                            msg.imagePreview = preview;
-                            state.updateMessage(chatId, msg);
-                        }
-                    } catch {
-                        // Игнорируем сетевые ошибки фоновой загрузки превью
-                    }
+            activePreviewLoads.add(msg.id);
+            try {
+                const preview = await loadMessageImagePreview(client, msg.rawMessage);
+                if (preview && state.activeChat?.id === chatId) {
+                    msg.imagePreview = preview;
+                    msg.isPreviewLoading = false;
+                    scheduleBatchPreviewUpdate(chatId);
                 }
+            } catch {
+                // Игнорируем сетевые ошибки фоновой загрузки превью
+            } finally {
+                activePreviewLoads.delete(msg.id);
             }
+            // Даём event loop обработать пользовательский ввод и скролл
+            await new Promise((resolve) => setImmediate(resolve));
         }
     }
 
@@ -523,13 +649,11 @@ export async function startTui(client, me) {
 
     listener.on("new_message", ({ peerId, message }) => {
         state.addMessage(peerId, message);
-        if (!message.imagePreview && (message.media?.className === "MessageMediaPhoto" || message.media?.className === "MessageMediaDocument")) {
+        if (message.isPreviewLoading) {
             fetchMissingImagePreviews([message], peerId);
         }
 
-        if (state.activeChat?.id === peerId) {
-            markAsRead(client, state.activeChat.peerId).catch(() => {});
-        } else if (!message.out) {
+        if (state.activeChat?.id !== peerId && !message.out) {
             const sender = message.senderName || "Новое сообщение";
             const preview = (message.text || "Вложение").slice(0, 30);
             statusBar.showMessage(`💬 ${sender}: "${preview}"`, "info", 5000);
@@ -770,6 +894,7 @@ export async function startTui(client, me) {
     screen.key(["C-q"], () => {
         releaseInputs();
         confirmModal.ask("Выйти из TuiGram?", () => {
+            flushPendingMarkAsRead();
             listener?.stop();
             screen.destroy();
             process.exit(0);

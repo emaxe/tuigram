@@ -1,5 +1,113 @@
 import blessed from "neo-blessed";
 
+// Патч neo-blessed: предотвращаем дублирование обработчиков keypress и циклы фокуса.
+// В neo-blessed при повторном focus() на уже сфокусированном элементе происходил blur+focus,
+// а readInput() создавал висячие обработчики keypress в nextTick, из-за чего вводимые символы
+// дублировались (например, "ттуутт??").
+if (!blessed.__tuigramPatched) {
+    blessed.__tuigramPatched = true;
+
+    const origElementFocus = blessed.element.prototype.focus;
+    blessed.element.prototype.focus = function() {
+        if (this.screen?.focused === this) return this;
+        return origElementFocus.call(this);
+    };
+
+    const origScreenFocusPush = blessed.screen.prototype.focusPush;
+    blessed.screen.prototype.focusPush = function(el) {
+        if (!el) return;
+        const old = this.history[this.history.length - 1];
+        if (old === el) return;
+        return origScreenFocusPush.call(this, el);
+    };
+
+    blessed.textarea.prototype.readInput = function(callback) {
+        const self = this;
+        const focused = this.screen.focused === this;
+
+        if (this._reading) return;
+        this._reading = true;
+
+        this._callback = callback;
+
+        if (!focused) {
+            this.screen.saveFocus();
+            this.focus();
+        }
+
+        this.screen.grabKeys = true;
+        this._updateCursor();
+        this.screen.program.showCursor();
+
+        if (this.__listener) {
+            this.removeListener("keypress", this.__listener);
+            delete this.__listener;
+        }
+        if (this.__done) {
+            this.removeListener("blur", this.__done);
+            delete this.__done;
+        }
+
+        this._done = function fn(err, value) {
+            if (!self._reading) return;
+
+            if (fn.done) return;
+            fn.done = true;
+
+            self._reading = false;
+
+            delete self._callback;
+            delete self._done;
+
+            if (self.__listener) {
+                self.removeListener("keypress", self.__listener);
+                delete self.__listener;
+            }
+            if (self.__done) {
+                self.removeListener("blur", self.__done);
+                delete self.__done;
+            }
+
+            self.screen.program.hideCursor();
+            self.screen.grabKeys = false;
+
+            if (!focused) {
+                self.screen.restoreFocus();
+            }
+
+            if (self.options.inputOnFocus) {
+                self.screen.rewindFocus();
+            }
+
+            if (err === "stop") return;
+
+            if (err) {
+                self.emit("error", err);
+            } else if (value != null) {
+                self.emit("submit", value);
+            } else {
+                self.emit("cancel", value);
+            }
+            self.emit("action", value);
+
+            if (!callback) return;
+            return err ? callback(err) : callback(null, value);
+        };
+
+        setImmediate(() => {
+            if (!self._reading) return;
+            if (self.__listener) {
+                self.removeListener("keypress", self.__listener);
+            }
+            self.__listener = self._listener.bind(self);
+            self.on("keypress", self.__listener);
+        });
+
+        this.__done = this._done.bind(this, null, null);
+        this.on("blur", this.__done);
+    };
+}
+
 /**
  * Глобальные сочетания, которые должны работать даже когда поле ввода или строка
  * поиска перехватили клавиатуру (blessed выставляет screen.grabKeys = true и

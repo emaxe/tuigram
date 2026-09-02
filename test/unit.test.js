@@ -8,12 +8,13 @@ import { upsertEnv, escapeEnvValue, isValidApiId, isValidApiHash, saveCredential
 import { parseProxyConfig, formatProxyUrl } from "../src/config.js";
 import { createHttpConnectSocket, TuiGramNetSockets } from "../src/telegram/socket.js";
 import { assertInteractiveInput } from "../src/telegram/auth.js";
-import { strippedPhotoToJpg, decodeImageBuffer, calculateTargetDimensions, resizeRgba, rgbaToHex, rgbaToHalfBlockBlessed, renderImageBuffer, renderStrippedThumbnail, imagePreviewCache } from "../src/utils/image.js";
+import { strippedPhotoToJpg, decodeImageBuffer, calculateTargetDimensions, resizeRgba, rgbaToHex, rgbaToHalfBlockBlessed, renderImageBuffer, renderStrippedThumbnail, imagePreviewCache, getMediaDimensions, isPreviewableMedia, renderMediaPreloader, getCachedImagePreview } from "../src/utils/image.js";
 import { stringCellWidth, isInsideBox, isRightClick, getTabByCoordinate, getMessageAtLine, getMessagePartAtPoint, getStatusBarActionAt, getHeaderActionAt, getInputContextActionAt } from "../src/utils/mouse.js";
-import { normalizeMessage } from "../src/telegram/messages.js";
+import { normalizeMessage, findFirstUnreadMessage, calculateRemainingUnreadCount } from "../src/telegram/messages.js";
+import { normalizeDialog, filterDialogsByTab } from "../src/telegram/dialogs.js";
 import jpegJs from "jpeg-js";
 import { PNG } from "pngjs";
-import { isMessageVideo, rgb24ToHalfBlockBlessed, extractFirstFileFromZip, findFfmpegPath, isFfmpegAvailable } from "../src/utils/video.js";
+import { isMessageVideo, rgb24ToHalfBlockBlessed, extractFirstFileFromZip, findFfmpegPath, findFfplayPath, isFfmpegAvailable, spawnVideoPlayer, spawnAudioPlayer } from "../src/utils/video.js";
 import { config } from "../src/config.js";
 import blessed from "neo-blessed";
 import fs from "node:fs";
@@ -66,12 +67,78 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     assert.equal(toMarkedId(new Api.PeerChannel({ channelId: 789n })), "-100789");
     assert.equal(toMarkedId(null), "");
     assert.equal(toMarkedId("-1001234567890"), "-1001234567890");
+
+    // Проверка readInboxMaxId в normalizeDialog
+    const rawMockDialog = {
+        id: 100n,
+        entity: { className: "User", id: 100n, firstName: "Alice" },
+        unreadCount: 4,
+        dialog: { readInboxMaxId: 50, readOutboxMaxId: 40, topMessage: 54 },
+    };
+    const normDialog = normalizeDialog(rawMockDialog);
+    assert.equal(normDialog.readInboxMaxId, 50);
+    assert.equal(normDialog.unreadCount, 4);
+
+    // filterDialogsByTab с сохранением активного чата на вкладке unread
+    const testFilterDialogs = [
+        { id: "1", unreadCount: 0, archived: false, type: "user" },
+        { id: "2", unreadCount: 5, archived: false, type: "user" },
+    ];
+    assert.equal(filterDialogsByTab(testFilterDialogs, "unread").length, 1);
+    assert.equal(filterDialogsByTab(testFilterDialogs, "unread", "1").length, 2, "активный чат '1' должен оставаться в списке");
+
+    // findFirstUnreadMessage
+    const unreadTestMsgs = [
+        { id: 10, out: false, text: "msg 10" },
+        { id: 20, out: true, text: "msg 20 (out)" },
+        { id: 30, out: false, text: "msg 30" },
+        { id: 40, out: false, text: "msg 40" },
+    ];
+    // Если readInboxMaxId = 20, первое непрочитанное — id 30 (исходящее 20 пропускается)
+    assert.equal(findFirstUnreadMessage(unreadTestMsgs, { readInboxMaxId: 20, unreadCount: 2 })?.id, 30);
+    // Если unreadCount = 0 — непрочитанных нет
+    assert.equal(findFirstUnreadMessage(unreadTestMsgs, { readInboxMaxId: 20, unreadCount: 0 }), null);
+    // Если readInboxMaxId = 0, берутся первые из последних unreadCount входящих сообщений
+    assert.equal(findFirstUnreadMessage(unreadTestMsgs, { readInboxMaxId: 0, unreadCount: 1 })?.id, 40);
+    assert.equal(findFirstUnreadMessage(unreadTestMsgs, { readInboxMaxId: 0, unreadCount: 2 })?.id, 30);
+    // Пустой список
+    assert.equal(findFirstUnreadMessage([], { readInboxMaxId: 0, unreadCount: 5 }), null);
+
+    // calculateRemainingUnreadCount
+    assert.equal(calculateRemainingUnreadCount(unreadTestMsgs, 0), 3); // 3 входящих
+    assert.equal(calculateRemainingUnreadCount(unreadTestMsgs, 10), 2); // id 30 и 40
+    assert.equal(calculateRemainingUnreadCount(unreadTestMsgs, 30), 1); // id 40
+    assert.equal(calculateRemainingUnreadCount(unreadTestMsgs, 40), 0); // все прочитаны
+
+    // Тесты для большого количества сообщений (>100, например 131 непрочитанное)
+    const largeHistory = [];
+    // 20 прочитанных сообщений (id 1..20)
+    for (let i = 1; i <= 20; i++) {
+        largeHistory.push({ id: i, out: false, text: `read msg ${i}` });
+    }
+    // 131 непрочитанное сообщение (id 21..151)
+    for (let i = 21; i <= 151; i++) {
+        largeHistory.push({ id: i, out: false, text: `unread msg ${i}` });
+    }
+    // Проверяем нахождение 1-го непрочитанного среди 151 сообщения
+    const firstOf131 = findFirstUnreadMessage(largeHistory, { readInboxMaxId: 20, unreadCount: 131 });
+    assert.equal(firstOf131?.id, 21, "первое непрочитанное должно быть id 21");
+
+    // Вычисление остатка непрочитанных для 131 сообщения
+    assert.equal(calculateRemainingUnreadCount(largeHistory, 20), 131);
+    assert.equal(calculateRemainingUnreadCount(largeHistory, 21), 130);
+    assert.equal(calculateRemainingUnreadCount(largeHistory, 53), 98); // id 54..151 = 98 шт
+
+    // Вычисление остатка при частичной загрузке истории с totalUnreadCount
+    const partialHistory = largeHistory.slice(-50); // только последние 50 сообщений
+    assert.equal(calculateRemainingUnreadCount(partialHistory, 140, 131), 92); // (131 - 50) + 11 = 92
+
     console.log("  ✓ entities.js tests passed");
 }
 
 // 3. Тесты форматтера разметки
 {
-    assert.equal(escapeBlessed("Hello {world}"), "Hello \\{world\\}");
+    assert.equal(escapeBlessed("Hello {world}"), "Hello {open}world{close}");
 
     const raw = "Hello bold world";
     const entities = [{ className: "MessageEntityBold", offset: 6, length: 4 }];
@@ -102,6 +169,7 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
 
 // 4. Тесты геометрии TUI (blessed рисует только то, чему хватило строк)
 {
+    await import("../src/ui/screen.js");
     const { createHeader } = await import("../src/ui/components/header.js");
     const { createInputBox } = await import("../src/ui/components/inputBox.js");
     const { createChatList } = await import("../src/ui/components/chatList.js");
@@ -217,6 +285,71 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     assert.equal(lastEvent?.isNewMessage, true);
     assert.equal(lastEvent?.isUpdate, undefined);
 
+    // Тесты позиционирования на первое непрочитанное сообщение и отслеживания прочтения
+    let reportedReadId = 0;
+    const chatViewUnread = createChatView(screen, theme, {
+        onMessagesRead: (id) => {
+            reportedReadId = id;
+        },
+    });
+
+    // 30 сообщений, первое непрочитанное — #15
+    chatViewUnread.setMessages(testMsgs, { firstUnreadId: 15, autoScrollToBottom: false });
+    const content = chatViewUnread.scrollBox.getContent();
+    assert.ok(content.includes("Непрочитанные сообщения"), "лента должна содержать разделитель непрочитанных сообщений");
+    // Скролл должен быть позиционирован около сообщения 15, а не в самом низу
+    assert.ok(chatViewUnread.scrollBox.childBase < chatViewUnread.scrollBox.getScrollHeight() - chatViewUnread.scrollBox.height);
+    assert.ok(reportedReadId >= 15, "onMessagesRead должен зафиксировать видимые сообщения");
+
+    // Прокрутка вниз увеличивает прочитанный ID
+    const prevRead = reportedReadId;
+    chatViewUnread.scrollBox.scrollTo(chatViewUnread.scrollBox.getScrollHeight());
+    chatViewUnread.checkVisibleMessages();
+    assert.ok(reportedReadId >= prevRead, "прокрутка вниз должна отмечать дальнейшие сообщения прочитанными");
+
+    // Тест Lazy Loading видимых сообщений (onVisibleMessagesChanged)
+    let visibleMsgsReported = [];
+    const chatViewLazy = createChatView(screen, theme, {
+        onVisibleMessagesChanged: (msgs) => {
+            visibleMsgsReported = msgs;
+        },
+    });
+    chatViewLazy.setMessages(testMsgs, true);
+    assert.ok(visibleMsgsReported.length > 0, "chatView должен уведомлять о видимых сообщениях");
+    assert.ok(visibleMsgsReported.length < testMsgs.length, "видимых сообщений должно быть меньше общего списка");
+    assert.ok(visibleMsgsReported.some((m) => m.id === 30), "при скролле в конец последнее сообщение должно быть видимым");
+
+    // Тест state.updateDialogUnread
+    state.setDialogs([
+        { id: "chat_1", title: "Chat 1", unreadCount: 10, readInboxMaxId: 5, archived: false, type: "user" },
+    ]);
+    state.updateDialogUnread("chat_1", 3, 12);
+    const updatedDialog = state.dialogs.find((d) => d.id === "chat_1");
+    assert.equal(updatedDialog.unreadCount, 3);
+    assert.equal(updatedDialog.readInboxMaxId, 12);
+
+    // Сброс в 0 очищает mentions
+    updatedDialog.unreadMentionsCount = 2;
+    state.updateDialogUnread("chat_1", 0, 15);
+    assert.equal(updatedDialog.unreadCount, 0);
+    assert.equal(updatedDialog.unreadMentionsCount, 0);
+
+    // Проверка: при переключении на чат с непрочитанными сообщениями позиционирование сразу на первое непрочитанное
+    const chatWithUnread = { id: "chat_unread", title: "Unread Chat", unreadCount: 5, readInboxMaxId: 20, archived: false, type: "user" };
+    state.setMessages("chat_unread", testMsgs);
+    const unreadMsg = findFirstUnreadMessage(state.getMessages("chat_unread"), chatWithUnread);
+    assert.equal(unreadMsg?.id, 22, "id 21 исходящее, первое непрочитанное входящее должно быть id 22");
+    let switchReadId = 0;
+    const chatViewSwitch = createChatView(screen, theme, {
+        onMessagesRead: (id) => { switchReadId = id; },
+    });
+    chatViewSwitch.resetReadState(chatWithUnread.readInboxMaxId);
+    chatViewSwitch.setMessages(state.getMessages("chat_unread"), { firstUnreadId: unreadMsg.id, autoScrollToBottom: false });
+    // Проверяем, что не промоталось в самый низ ленты (#30)
+    assert.ok(chatViewSwitch.scrollBox.childBase < chatViewSwitch.scrollBox.getScrollHeight() - chatViewSwitch.scrollBox.height);
+    // Проверяем, что последнее сообщение (#30) не отметилось прочитанным сразу
+    assert.ok(switchReadId < 30, "последние непрочитанные сообщения не должны сразу отмечаться прочитанными");
+
     // Тесты подсветки рамок активного блока при фокусе
     const releaseInputs = () => {
         chatList.release?.();
@@ -251,6 +384,18 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     chatList.focus();
     assert.equal(inputBox.container.style.border.fg, theme.borders.fg, "inputBox не должен подсвечиваться после потери фокуса");
     assert.equal(chatList.container.style.border.fg, theme.borders.focusFg, "chatList снова должен подсвечиваться при фокусе");
+
+    // Проверка отсутствия дублирования вводимого текста при многократном фокусе
+    for (let i = 0; i < 5; i++) {
+        inputBox.focus();
+        inputBox.textarea.focus();
+    }
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(inputBox.textarea.listeners("keypress").length, 1, "у textarea должен быть ровно 1 обработчик keypress");
+    inputBox.textarea.setValue("");
+    input.write("тут?");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(inputBox.textarea.getValue(), "тут?", "символы при вводе не должны дублироваться");
 
     state.off("messages_updated", onUpdate);
 
@@ -550,9 +695,48 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     const { PassThrough } = await import("node:stream");
     const blessed = (await import("neo-blessed")).default;
     const unicode = (await import("neo-blessed/lib/unicode.js")).default;
-    const { createChatList } = await import("../src/ui/components/chatList.js");
+    const { createChatList, formatDialogItem, cellWidth, truncate } = await import("../src/ui/components/chatList.js");
     const { getTheme } = await import("../src/ui/theme.js");
     const { normalizeDialog } = await import("../src/telegram/dialogs.js");
+
+    const defaultTheme = getTheme("default");
+
+    // Тесты truncate и cellWidth (включая символы Unicode Alphanumeric Supplement)
+    assert.equal(cellWidth("Test"), 4);
+    assert.equal(cellWidth("🎬"), 2);
+    assert.equal(cellWidth("🆃🆁"), 4);
+    assert.equal(cellWidth("Алания 🆃🆁 Чат"), 15);
+    assert.equal(truncate("Hello World", 5), "Hell…");
+    assert.equal(cellWidth(truncate("Hello World", 5)), 5);
+    assert.equal(truncate("Short", 10), "Short");
+    assert.equal(truncate("🎬 Фильм", 4), "🎬 …");
+    assert.ok(cellWidth(truncate("🎬 Фильм", 4)) <= 4);
+
+    // Тесты formatDialogItem: отображение счётчика [99+] и точного количества
+    const d99Plus = { id: "1", type: "channel", title: "Новости", unreadCount: 100, date: 1700000000 };
+    const formatted99Plus = formatDialogItem(d99Plus, 35, defaultTheme);
+    assert.ok(formatted99Plus.includes("[99+]"), "для 100 непрочитанных должно быть [99+]");
+    assert.ok(!formatted99Plus.includes("[100]"), "не должно быть точного [100]");
+
+    const dExact = { id: "2", type: "user", title: "Анна", unreadCount: 42, date: 1700000000 };
+    const formattedExact = formatDialogItem(dExact, 35, defaultTheme);
+    assert.ok(formattedExact.includes("[42]"), "для 42 непрочитанных должно быть [42]");
+
+    const dZero = { id: "3", type: "user", title: "Анна", unreadCount: 0, date: 1700000000 };
+    const formattedZero = formatDialogItem(dZero, 35, defaultTheme);
+    assert.ok(!formattedZero.includes("["), "при 0 непрочитанных не должно быть скобок бейджа");
+
+    // Тест правого выравнивания и сокращения длинного названия с троеточием
+    const dLong = {
+        id: "4",
+        type: "supergroup",
+        title: "Очень длинное название чата, которое совершенно не помещается в строку",
+        unreadCount: 250,
+        date: 1700000000,
+    };
+    const formattedLong = formatDialogItem(dLong, 35, defaultTheme);
+    assert.ok(formattedLong.includes("[99+]"));
+    assert.ok(formattedLong.includes("…"), "длинный заголовок должен содержать троеточие");
 
     const output = fsp.createWriteStream("/dev/null");
     output.isTTY = true;
@@ -570,7 +754,7 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
         output,
         terminal: "xterm-256color",
     });
-    const chatList = createChatList(screen, getTheme("default"), {});
+    const chatList = createChatList(screen, defaultTheme, {});
     const now = Date.now();
 
     chatList.setDialogs([
@@ -579,10 +763,10 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
           lastMessage: { text: "Фермер 🧑НЕЙРОДВИЖ 🐝подсказал" } },
         { id: "1", type: "supergroup", title: "Чат лабы", unreadCount: 3, date: now,
           lastMessage: { text: "любая подойдет, главное" } },
-        // Длинное название + трёхзначный счётчик — самый тесный случай
+        // Длинное название + трёхзначный счётчик — самый тесный случай (должно быть [99+])
         { id: "2", type: "supergroup", title: "Тихон | Помогаю разрабам", unreadCount: 289, date: now,
           lastMessage: { text: "что-то" } },
-        // Эмодзи в самом названии
+        // Эмодзи в самом названии (>99 -> [99+])
         { id: "3", type: "channel", title: "🎬 Кино 🍿 и 🎭 театр", unreadCount: 724, date: now,
           lastMessage: { text: "🎉🎊🥳 премьера" } },
         { id: "4", type: "user", title: "Rafik", unreadCount: 0, date: now,
@@ -603,9 +787,9 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
         assert.equal(item._clines.length, 1, `строка ${i} перенеслась: ${JSON.stringify(raw)}`);
 
         // Счётчик непрочитанных не должен обрезаться
-        const badge = (raw.match(/\[\d+\]/) || [])[0];
-        if (badge) {
-            assert.ok(drawn.includes(badge), `строка ${i}: бейдж ${badge} обрезан (${JSON.stringify(drawn)})`);
+        const badgeMatch = (raw.match(/\[(?:\d+|\d+\+)\]/) || [])[0];
+        if (badgeMatch) {
+            assert.ok(drawn.includes(badgeMatch), `строка ${i}: бейдж ${badgeMatch} обрезан (${JSON.stringify(drawn)})`);
         }
 
         // Ничего не вылезает за пределы элемента
@@ -1165,7 +1349,7 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
                     {
                         className: "PhotoStrippedSize",
                         type: "i",
-                        bytes: Buffer.concat([Buffer.from([1, 2, 2]), testJpg.subarray(20, testJpg.length - 2)])
+                        bytes: testJpg,
                     }
                 ]
             }
@@ -1179,6 +1363,172 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     // 8. Защита от поврежденных буферов
     assert.equal(renderImageBuffer(Buffer.from([0, 1, 2, 3])), "");
     assert.equal(renderStrippedThumbnail(Buffer.from([])), "");
+
+    // 9. Тесты getMediaDimensions
+    const photoWithSizes = {
+        media: {
+            className: "MessageMediaPhoto",
+            photo: {
+                sizes: [
+                    { type: "s", w: 100, h: 75 },
+                    { type: "x", w: 800, h: 600 },
+                    { type: "m", w: 320, h: 240 },
+                ],
+            },
+        },
+    };
+    assert.deepEqual(getMediaDimensions(photoWithSizes), { width: 800, height: 600 });
+
+    const videoWithAttr = {
+        media: {
+            className: "MessageMediaDocument",
+            document: {
+                attributes: [
+                    { className: "DocumentAttributeVideo", w: 1920, h: 1080, duration: 45 },
+                ],
+            },
+        },
+    };
+    assert.deepEqual(getMediaDimensions(videoWithAttr), { width: 1920, height: 1080 });
+
+    const docWithImageSize = {
+        media: {
+            className: "MessageMediaDocument",
+            document: {
+                attributes: [
+                    { className: "DocumentAttributeImageSize", w: 1024, h: 768 },
+                ],
+            },
+        },
+    };
+    assert.deepEqual(getMediaDimensions(docWithImageSize), { width: 1024, height: 768 });
+
+    assert.equal(getMediaDimensions(null), null);
+    assert.equal(getMediaDimensions({}), null);
+
+    // 10. Тесты isPreviewableMedia
+    assert.equal(isPreviewableMedia(photoWithSizes), true);
+    assert.equal(isPreviewableMedia(videoWithAttr), true);
+    assert.equal(isPreviewableMedia(docWithImageSize), true);
+    assert.equal(isPreviewableMedia({ media: { className: "MessageMediaDocument", document: { mimeType: "video/quicktime" } } }), true);
+    assert.equal(isPreviewableMedia({ media: { className: "MessageMediaDocument", document: { mimeType: "image/png" } } }), true);
+    assert.equal(isPreviewableMedia({ media: { className: "MessageMediaDocument", document: { attributes: [{ className: "DocumentAttributeAnimated" }] } } }), true);
+    assert.equal(isPreviewableMedia({ media: { className: "MessageMediaDocument", document: { attributes: [{ className: "DocumentAttributeSticker" }] } } }), true);
+    assert.equal(isPreviewableMedia({ media: { className: "MessageMediaDocument", document: { mimeType: "application/pdf" } } }), false);
+    assert.equal(isPreviewableMedia({ media: { className: "MessageMediaDocument", document: { attributes: [{ className: "DocumentAttributeAudio" }] } } }), false);
+    assert.equal(isPreviewableMedia({ media: { className: "MessageMediaPoll" } }), false);
+    assert.equal(isPreviewableMedia(null), false);
+
+    // 11. Тесты renderMediaPreloader (размеры, строки и подписи)
+    // 4:3 фото (800x600) при maxWidth=36, maxHeight=14
+    const photoPreloader = renderMediaPreloader(photoWithSizes, { maxWidth: 36, maxHeight: 14 });
+    const photoPreloaderLines = photoPreloader.split("\n");
+    assert.equal(photoPreloaderLines.length, 14, "количество строк прелоадера должно соответствовать расчетной высоте");
+    for (const line of photoPreloaderLines) {
+        assert.equal(stringCellWidth(line), 36, "ширина каждой строки прелоадера должна быть ровно dstW");
+    }
+    assert.ok(photoPreloader.includes("Загрузка фото"), "прелоадер фото должен содержать подпись загрузки фото");
+    assert.ok(photoPreloader.includes("800×600"), "прелоадер должен содержать размеры медиа");
+
+    // 16:9 видео (1920x1080) при maxWidth=36, maxHeight=14
+    const videoPreloader = renderMediaPreloader(videoWithAttr, { maxWidth: 36, maxHeight: 14 });
+    const videoPreloaderLines = videoPreloader.split("\n");
+    assert.equal(videoPreloaderLines.length, 10, "16:9 видео должно занимать 10 строк в прелоадере");
+    for (const line of videoPreloaderLines) {
+        assert.equal(stringCellWidth(line), 36, "ширина каждой строки видео-прелоадера должна быть 36");
+    }
+    assert.ok(videoPreloader.includes("Загрузка видео"), "прелоадер видео должен содержать метку видео");
+    assert.ok(videoPreloader.includes("0:45"), "прелоадер видео должен содержать длительность");
+
+    // Сравнение размеров прелоадера и готового декодированного рендера:
+    // Размеры обязаны совпадать строка в строку, чтобы лента сообщений не сдвигалась при загрузке
+    const { dstW: targetW, rows: targetRows } = calculateTargetDimensions(1920, 1080, 36, 14);
+    assert.equal(targetRows, videoPreloaderLines.length, "число строк прелоадера и итогового изображения должно совпадать");
+    assert.equal(targetW, 36, "ширина прелоадера и итогового изображения должна совпадать");
+
+    // Пользовательская подпись и кастомная палитра
+    const customPreloader = renderMediaPreloader(photoWithSizes, {
+        maxWidth: 24,
+        maxHeight: 8,
+        customLabel: "Мой прелоадер",
+        palette: { bg: "#2e3440", border: "#4c566a", fg: "#d8dee9" },
+    });
+    assert.ok(customPreloader.includes("Мой прелоадер"));
+    assert.ok(customPreloader.includes("#2e3440-bg"));
+    assert.ok(customPreloader.includes("#4c566a-fg"));
+
+    // Граничные случаи: узкие/низкие прелоадеры (1-2 строки)
+    const smallRows1 = renderMediaPreloader(photoWithSizes, { maxWidth: 20, maxHeight: 1 });
+    assert.equal(smallRows1.split("\n").length, 1);
+    const smallRows2 = renderMediaPreloader(photoWithSizes, { maxWidth: 20, maxHeight: 2 });
+    assert.equal(smallRows2.split("\n").length, 2);
+
+    // 12. Тест интеграции normalizeMessage с прелоадером и фоновой подгрузкой
+    // Сообщение с PhotoStrippedSize -> сразу готовое превью, isPreviewLoading = false
+    assert.equal(norm.isPreviewLoading, false);
+    assert.ok(norm.imagePreview.includes("▀"));
+
+    // Сообщение с фото БЕЗ PhotoStrippedSize -> прелоадер, isPreviewLoading = true
+    const msgWithoutStripped = {
+        id: 43,
+        date: 1700000000,
+        out: false,
+        message: "Фото без встроенной миниатюры",
+        media: {
+            className: "MessageMediaPhoto",
+            photo: {
+                id: 99999n,
+                sizes: [
+                    { type: "x", w: 1280, h: 720 },
+                ],
+            },
+        },
+    };
+    const normWithoutStripped = normalizeMessage(msgWithoutStripped);
+    assert.equal(normWithoutStripped.id, 43);
+    assert.equal(normWithoutStripped.isPreviewLoading, true);
+    assert.ok(normWithoutStripped.imagePreview.includes("⏳"), "imagePreview должен содержать прелоадер");
+    assert.ok(normWithoutStripped.imagePreview.includes("┌"), "imagePreview должен иметь рамку прелоадера");
+
+    // Сообщение с видео -> прелоадер видео, isPreviewLoading = true
+    const normVideoMsg = normalizeMessage({
+        id: 44,
+        date: 1700000000,
+        out: false,
+        message: "Видеосообщение",
+        media: videoWithAttr.media,
+    });
+    assert.equal(normVideoMsg.id, 44);
+    assert.equal(normVideoMsg.isPreviewLoading, true);
+    assert.ok(/видео/i.test(normVideoMsg.imagePreview), "imagePreview должен содержать прелоадер видео");
+
+    // Обычный документ (PDF) -> imagePreview отсутствует, isPreviewLoading = false
+    const normPdf = normalizeMessage({
+        id: 45,
+        date: 1700000000,
+        out: false,
+        message: "Документ",
+        media: {
+            className: "MessageMediaDocument",
+            document: { mimeType: "application/pdf" },
+        },
+    });
+    assert.equal(normPdf.imagePreview, null);
+    assert.equal(normPdf.isPreviewLoading, false);
+
+    // 13. Тесты getCachedImagePreview
+    imagePreviewCache.set("photo_full_777@36x14", "{#112233-fg}CACHED_PREVIEW{/}");
+    const msgCached = {
+        id: 50,
+        media: {
+            className: "MessageMediaPhoto",
+            photo: { id: 777n },
+        },
+    };
+    assert.equal(getCachedImagePreview(msgCached, { maxWidth: 36, maxHeight: 14 }), "{#112233-fg}CACHED_PREVIEW{/}");
+    const normCached = normalizeMessage(msgCached);
+    assert.equal(normCached.imagePreview, "{#112233-fg}CACHED_PREVIEW{/}");
+    assert.equal(normCached.isPreviewLoading, false);
 
     console.log("  ✓ image.js & preview rendering tests passed");
 }
@@ -1573,9 +1923,44 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     assert.equal(extracted.name, testFileName);
     assert.equal(extracted.data.toString("utf8"), "ffmpeg test binary payload");
 
-    // 14.5 Тест модального окна видеоплеера
+    // 14.5 Тесты spawnVideoPlayer и spawnAudioPlayer
+    let errorCalled = false;
+    const fakeVideoPlayer = spawnVideoPlayer("/nonexistent/ffmpeg", "/tmp/fake.mp4", {
+        onError: () => { errorCalled = true; },
+    });
+    assert.equal(typeof fakeVideoPlayer.pause, "function");
+    assert.equal(typeof fakeVideoPlayer.resume, "function");
+    assert.equal(typeof fakeVideoPlayer.kill, "function");
+    assert.equal(typeof fakeVideoPlayer.isPaused, "function");
+    assert.equal(fakeVideoPlayer.isPaused(), false);
+    fakeVideoPlayer.pause();
+    fakeVideoPlayer.resume();
+    fakeVideoPlayer.kill();
+
+    const fakeAudioPlayer = spawnAudioPlayer("/tmp/fake.mp4");
+    assert.equal(typeof fakeAudioPlayer.pause, "function");
+    assert.equal(typeof fakeAudioPlayer.resume, "function");
+    assert.equal(typeof fakeAudioPlayer.kill, "function");
+    fakeAudioPlayer.pause();
+    fakeAudioPlayer.resume();
+    fakeAudioPlayer.kill();
+
+    // 14.6 Тест модального окна видеоплеера
     const { createVideoPlayerModal } = await import("../src/ui/components/modals/videoPlayerModal.js");
-    const testScreen = blessed.screen({ smartCSR: true, dump: false, warnings: false });
+    const { PassThrough } = await import("node:stream");
+    const testInput = new PassThrough();
+    testInput.isTTY = true;
+    testInput.setRawMode = () => {};
+    const testOutput = new PassThrough();
+    testOutput.isTTY = true;
+
+    const testScreen = blessed.screen({
+        smartCSR: true,
+        dump: false,
+        warnings: false,
+        input: testInput,
+        output: testOutput,
+    });
     const testTheme = getTheme("default");
 
     let videoLoadCalls = 0;

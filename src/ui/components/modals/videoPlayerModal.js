@@ -173,12 +173,20 @@ export function createVideoPlayerModal(screen, theme, { onLoadVideoFile, onRende
             onEnd: () => {
                 if (myToken !== token) return;
                 statusText = "Воспроизведение завершено";
+                if (audioProcess) {
+                    audioProcess.kill();
+                    audioProcess = null;
+                }
                 renderFooter();
                 screen.render();
             },
             onError: (err) => {
                 if (myToken !== token) return;
                 statusText = `Ошибка декодирования: ${err.message}`;
+                if (audioProcess) {
+                    audioProcess.kill();
+                    audioProcess = null;
+                }
                 renderFooter();
                 screen.render();
             },
@@ -189,7 +197,7 @@ export function createVideoPlayerModal(screen, theme, { onLoadVideoFile, onRende
      * Открывает полноэкранный плеер для воспроизведения видеосообщения.
      * @param {object} msg нормализованное сообщение
      */
-    function play(msg) {
+    async function play(msg) {
         if (!msg) return;
 
         const myToken = ++token;
@@ -228,25 +236,24 @@ export function createVideoPlayerModal(screen, theme, { onLoadVideoFile, onRende
         renderFooter();
         screen.render();
 
-        Promise.resolve()
-            .then(() => onLoadVideoFile?.(msg, (p) => {
+        try {
+            const filePath = await onLoadVideoFile?.(msg, (p) => {
                 if (myToken !== token) return;
                 const percent = Math.round((p || 0) * 100);
                 statusText = `Загрузка: ${percent}%...`;
                 renderFooter();
                 screen.render();
-            }))
-            .then((filePath) => {
-                if (myToken !== token || !filePath) return;
-                currentVideoPath = filePath;
-                startPlayback(filePath, myToken);
-            })
-            .catch((err) => {
-                if (myToken !== token) return;
-                statusText = `Ошибка загрузки: ${err.message}`;
-                renderFooter();
-                screen.render();
             });
+
+            if (myToken !== token || !filePath) return;
+            currentVideoPath = filePath;
+            startPlayback(filePath, myToken);
+        } catch (err) {
+            if (myToken !== token) return;
+            statusText = `Ошибка загрузки: ${err.message}`;
+            renderFooter();
+            screen.render();
+        }
     }
 
     modal.key(["space"], togglePause);

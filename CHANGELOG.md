@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Planned
+
+- English localization of the TUI and CLI interface strings.
+
+## [1.5.0] — 2026-09-02
+
 ### Added
 
 - Video playback support in ANSI pseudographics (Unicode Half-Block) with synchronized audio track.
@@ -17,9 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Video player modal with playback controls (`[Space]` for pause/resume, `[r]` to replay, `[Esc]` / `[q]` to exit).
 - Interactive video playback via message action menu and by clicking on video message preview in chat view.
 
-### Planned
+### Changed
 
-- English localization of the TUI and CLI interface strings.
+- Enhanced unread message badge in dialog list: counters above 99 are shown as `[99+]`, and the right block (time and unread badge) is always right-aligned, truncating long chat titles with an ellipsis when space is constrained.
+
+### Fixed
+
+- Opening a chat with unread messages now scrolls and positions directly at the first unread message with an unread separator divider instead of always jumping to the last message.
+- Unread message badge and counter in the dialog list now dynamically decrease in real-time as messages are scrolled and read in the active chat.
 
 ## [1.4.0] — 2026-09-01
 
@@ -184,7 +195,8 @@ First public release.
 - A WCAG contrast test (3:1 threshold) applied to every theme **after** conversion
   to xterm-256 — the colors are checked exactly as the user sees them.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/emaxe/tuigram/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/emaxe/tuigram/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/emaxe/tuigram/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/emaxe/tuigram/compare/v1.1.0...v1.2.0
