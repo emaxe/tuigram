@@ -49,6 +49,12 @@ export function toMarkedId(peer) {
  * @returns {string|bigint}
  */
 export function parsePeer(raw) {
+    if (raw && typeof raw === "object") {
+        const marked = toMarkedId(raw);
+        if (marked && marked !== "[object Object]") {
+            return parsePeer(marked);
+        }
+    }
     const value = String(raw || "").trim();
     if (!value) throw new Error("Не указан идентификатор чата (peer)");
     if (value === "me" || value === "self") return "me";
@@ -106,18 +112,67 @@ class EntityCache {
     }
 
     set(id, entity) {
-        if (!id || !entity) return;
-        const key = idToString(id);
-        this.cache.set(key, entity);
+        if (!entity) return;
+        if (id !== null && id !== undefined) {
+            const key = idToString(id).trim().toLowerCase();
+            if (key) this.cache.set(key, entity);
+        }
+        if (entity.id !== null && entity.id !== undefined) {
+            const rawId = idToString(entity.id).trim().toLowerCase();
+            if (rawId) {
+                this.cache.set(rawId, entity);
+                if (entity.className === "Channel" || entity.broadcast || entity.megagroup) {
+                    this.cache.set(`-100${rawId}`, entity);
+                } else if (entity.className === "Chat") {
+                    this.cache.set(`-${rawId}`, entity);
+                }
+            }
+        }
+        const marked = toMarkedId(entity);
+        if (marked && marked !== "[object Object]") {
+            this.cache.set(marked.toLowerCase(), entity);
+        }
         if (entity.username) {
-            this.cache.set(`@${entity.username.toLowerCase()}`, entity);
+            const u = entity.username.toLowerCase();
+            this.cache.set(`@${u}`, entity);
+            this.cache.set(u, entity);
         }
     }
 
     get(idOrUsername) {
-        if (!idOrUsername) return null;
-        const key = String(idOrUsername).toLowerCase();
-        return this.cache.get(key) || this.cache.get(idToString(idOrUsername)) || null;
+        if (idOrUsername === null || idOrUsername === undefined) return null;
+        let key = "";
+        if (typeof idOrUsername === "object") {
+            const marked = toMarkedId(idOrUsername);
+            key = (marked && marked !== "[object Object]" ? marked : idToString(idOrUsername)).trim().toLowerCase();
+        } else {
+            key = String(idOrUsername).trim().toLowerCase();
+        }
+        if (!key) return null;
+
+        let found = this.cache.get(key);
+        if (found) return found;
+
+        if (key.startsWith("-100")) {
+            found = this.cache.get(key.slice(4));
+            if (found) return found;
+        } else if (key.startsWith("-")) {
+            found = this.cache.get(key.slice(1));
+            if (found) return found;
+        } else if (/^\d+$/.test(key)) {
+            found = this.cache.get(`-100${key}`) || this.cache.get(`-${key}`);
+            if (found) return found;
+        }
+
+        if (key.startsWith("@")) {
+            found = this.cache.get(key.slice(1));
+            if (found) return found;
+        } else {
+            found = this.cache.get(`@${key}`);
+            if (found) return found;
+        }
+
+        return null;
     }
 
     has(idOrUsername) {

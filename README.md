@@ -76,7 +76,7 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
     menu, clicking an image opens it full screen, clicking a video plays it, wheel scrolling);
   - Chat categories: All, Direct messages, Groups, Channels, Bots, Unread;
   - Instant search and filtering of chats by title and `@username` (`/`);
-  - Live typing indicator ("… is typing");
+  - Live typing indicator with sender display name in real time;
   - Colored rendering of Telegram entities (bold, italic, monospace code, URLs, mentions, spoilers);
   - High-resolution inline image previews (Unicode Half-Block `▀` pixel art);
   - Terminal video and video note playback (Unicode Half-Block + synchronized audio);

@@ -16,6 +16,7 @@ import { createImageViewerModal } from "./components/modals/imageViewerModal.js"
 import { createVideoPlayerModal } from "./components/modals/videoPlayerModal.js";
 import { state } from "../state.js";
 import { config } from "../config.js";
+import { entityCache, getEntityDisplayName, resolveEntity } from "../telegram/entities.js";
 import { fetchDialogs } from "../telegram/dialogs.js";
 import { setMessagePalette } from "../telegram/formatter.js";
 import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead, loadMessageImagePreview, downloadImageBuffer, renderMessageThumbnail, findFirstUnreadMessage, calculateRemainingUnreadCount } from "../telegram/messages.js";
@@ -668,8 +669,16 @@ export async function startTui(client, me) {
         state.removeMessages(peerId, deletedIds);
     });
 
-    listener.on("typing", ({ chatId, userId }) => {
-        state.setTyping(chatId, "Собеседник");
+    listener.on("typing", async ({ chatId, userId }) => {
+        let cached = entityCache.get(userId);
+        if (!cached && userId) {
+            try {
+                cached = await resolveEntity(client, userId);
+            } catch {
+                // Фоллбэк
+            }
+        }
+        state.setTyping(chatId, cached ? getEntityDisplayName(cached) : "Собеседник");
     });
 
     /**

@@ -97,7 +97,7 @@ export function createInputBox(screen, theme, {
 
     function renderContext() {
         if (currentMode === "reply" && currentTarget) {
-            const author = escapeBlessed(currentTarget.senderName || "Собеседник");
+            const author = escapeBlessed(currentTarget.senderName || (currentTarget.post ? "Канал" : "Собеседник"));
             const preview = escapeBlessed((currentTarget.text || "").slice(0, 30));
             contextBar.setContent(
                 badge(theme.input.replyBg, theme.input.replyFg,

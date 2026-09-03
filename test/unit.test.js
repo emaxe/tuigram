@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parsePeer, idToString, toMarkedId, detectChatType, getEntityDisplayName } from "../src/telegram/entities.js";
+import { parsePeer, idToString, toMarkedId, detectChatType, getEntityDisplayName, entityCache } from "../src/telegram/entities.js";
 import { Api } from "teleproto";
 import { formatMessageText, escapeBlessed, describeMedia, setMessagePalette } from "../src/telegram/formatter.js";
 import { getTheme, themes } from "../src/ui/theme.js";
@@ -67,6 +67,79 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     assert.equal(toMarkedId(new Api.PeerChannel({ channelId: 789n })), "-100789");
     assert.equal(toMarkedId(null), "");
     assert.equal(toMarkedId("-1001234567890"), "-1001234567890");
+
+    // parsePeer с Peer объектами
+    assert.equal(parsePeer(new Api.PeerChannel({ channelId: 789n })), -100789n);
+    assert.equal(parsePeer(new Api.PeerUser({ userId: 123n })), 123n);
+    assert.equal(parsePeer(new Api.PeerChat({ chatId: 456n })), -456n);
+
+    // entityCache с каналами и маркированными/немаркированными ключами
+    const mockChannel = { className: "Channel", id: 9999n, broadcast: true, title: "Тестовый Канал", username: "test_channel" };
+    entityCache.set(mockChannel.id, mockChannel);
+    assert.equal(entityCache.get("9999")?.title, "Тестовый Канал");
+    assert.equal(entityCache.get("-1009999")?.title, "Тестовый Канал");
+    assert.equal(entityCache.get(9999n)?.title, "Тестовый Канал");
+    assert.equal(entityCache.get("@test_channel")?.title, "Тестовый Канал");
+    assert.equal(entityCache.get("test_channel")?.title, "Тестовый Канал");
+    assert.equal(entityCache.get(new Api.PeerChannel({ channelId: 9999n }))?.title, "Тестовый Канал");
+
+    // normalizeMessage для каналов и авторов сообщений
+    // 1. Пост в канале без подписи автора
+    const channelPostNoAuthor = {
+        id: 1,
+        post: true,
+        peerId: new Api.PeerChannel({ channelId: 9999n }),
+        message: "Новость канала",
+    };
+    const normChannelPost1 = normalizeMessage(channelPostNoAuthor, mockChannel);
+    assert.equal(normChannelPost1.senderName, "Тестовый Канал");
+    assert.equal(normChannelPost1.post, true);
+
+    // 2. Пост в канале с подписью автора (postAuthor)
+    const channelPostWithAuthor = {
+        id: 2,
+        post: true,
+        postAuthor: "Редактор",
+        peerId: new Api.PeerChannel({ channelId: 9999n }),
+        message: "Подписанная статья",
+    };
+    const normChannelPost2 = normalizeMessage(channelPostWithAuthor, mockChannel);
+    assert.equal(normChannelPost2.senderName, "Тестовый Канал (Редактор)");
+
+    // 3. Пост в канале от владельца (out: true) всё равно отображается от имени канала
+    const channelPostOwner = {
+        id: 3,
+        post: true,
+        out: true,
+        peerId: new Api.PeerChannel({ channelId: 9999n }),
+        message: "Пост владельца",
+    };
+    const normChannelPost3 = normalizeMessage(channelPostOwner, mockChannel);
+    assert.equal(normChannelPost3.senderName, "Тестовый Канал");
+
+    // 4. Личный диалог (1-на-1) — входящее сообщение берет имя собеседника
+    const mockUserEntity = { className: "User", id: 555n, firstName: "Иван", lastName: "Иванов" };
+    const directMsg = {
+        id: 4,
+        out: false,
+        peerId: new Api.PeerUser({ userId: 555n }),
+        message: "Привет!",
+    };
+    const normDirectMsg = normalizeMessage(directMsg, mockUserEntity);
+    assert.equal(normDirectMsg.senderName, "Иван Иванов");
+
+    // 5. Группа — сообщение с сущностью sender
+    const mockGroupEntity = { className: "Chat", id: 777n, title: "Рабочая группа" };
+    const groupMsgWithSender = {
+        id: 5,
+        out: false,
+        fromId: new Api.PeerUser({ userId: 888n }),
+        peerId: new Api.PeerChat({ chatId: 777n }),
+        sender: { className: "User", id: 888n, firstName: "Сергей" },
+        message: "Всем привет",
+    };
+    const normGroupMsg = normalizeMessage(groupMsgWithSender, mockGroupEntity);
+    assert.equal(normGroupMsg.senderName, "Сергей");
 
     // Проверка readInboxMaxId в normalizeDialog
     const rawMockDialog = {

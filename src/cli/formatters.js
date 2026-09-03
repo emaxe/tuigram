@@ -30,7 +30,7 @@ export function formatDialogRow(d) {
 export function formatHistoryMessage(m) {
     const time = gray(`[${formatFullDateTime(m.date)}]`);
     const id = gray(`#${m.id}`);
-    const author = m.out ? green(bold("Вы:")) : cyan(bold(`${m.senderName || "Собеседник"}:`));
+    const author = (m.out && !m.post) ? green(bold("Вы:")) : cyan(bold(`${m.senderName || (m.post ? "Канал" : "Собеседник")}:`));
     const text = m.text || (m.mediaDescription ? m.mediaDescription.replace(/\{[a-z0-9\-]+\}/gi, "") : "");
     const reply = m.replyToMsgId ? gray(` (в ответ на #${m.replyToMsgId})`) : "";
     const edited = m.editDate ? gray(" (изменено)") : "";
@@ -50,7 +50,7 @@ export function formatStreamEvent(kind, data) {
         case "new_message": {
             const m = data.message;
             const peer = yellow(`[${data.peerId}]`);
-            const author = m.out ? green("Вы") : cyan(m.senderName || "Собеседник");
+            const author = (m.out && !m.post) ? green("Вы") : cyan(m.senderName || (m.post ? "Канал" : "Собеседник"));
             const text = m.text || "[медиа]";
             return `${time} ${green("+ НОВОЕ")} ${peer} ${author}: ${text}`;
         }

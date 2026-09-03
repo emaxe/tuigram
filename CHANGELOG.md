@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - English localization of the TUI and CLI interface strings.
 
+## [1.5.1] — 2026-09-03
+
+### Fixed
+
+- Message sender attribution across TUI and CLI: channel posts now display the channel title (along with author signature if present) instead of generic "Собеседник" or marking owner posts as "Вы ✓✓".
+- Sender names in direct 1-on-1 chats and groups are now properly resolved and cached from Telegram entities instead of falling back to "Собеседник".
+- Live typing indicator in the active chat now displays the typing user's display name instead of generic "Собеседник".
+- Contextual reply preview bar in the input box displays the channel name when replying to channel posts.
+- Resolution of Telegram Peer objects and channel IDs in `entityCache` and `parsePeer`.
+
 ## [1.5.0] — 2026-09-02
 
 ### Added
@@ -195,7 +205,8 @@ First public release.
 - A WCAG contrast test (3:1 threshold) applied to every theme **after** conversion
   to xterm-256 — the colors are checked exactly as the user sees them.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/emaxe/tuigram/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/emaxe/tuigram/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/emaxe/tuigram/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/emaxe/tuigram/compare/v1.2.0...v1.3.0

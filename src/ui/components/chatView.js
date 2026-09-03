@@ -123,11 +123,11 @@ export function createChatView(screen, theme, {
 
         // Отправитель
         let authorTag = "";
-        if (msg.out) {
+        if (msg.out && !msg.post) {
             const readCheck = fg(theme.chatView.outgoingName, "✓✓");
             authorTag = `${fg(theme.chatView.outgoingName, "{bold}Вы{/bold}")} ${timeTag} ${readCheck}`;
         } else {
-            const name = escapeBlessed(msg.senderName || "Собеседник");
+            const name = escapeBlessed(msg.senderName || (msg.post ? "Канал" : "Собеседник"));
             authorTag = `${fg(theme.chatView.incomingName, `{bold}${name}{/bold}`)} ${timeTag}`;
         }
 

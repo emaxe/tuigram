@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { Api } from "teleproto";
 import { NewMessage, EditedMessage, DeletedMessage, Raw } from "teleproto/events/index.js";
 import { normalizeMessage } from "./messages.js";
-import { idToString, toMarkedId, entityCache } from "./entities.js";
+import { idToString, toMarkedId, entityCache, getEntityDisplayName } from "./entities.js";
 
 /**
  * Приводит идентификатор чата из сырого апдейта к маркированному виду (как dialog.id).
@@ -36,20 +36,38 @@ export function startTelegramListener(client) {
         try {
             const msg = event.message;
             if (!msg) return;
-            const normalized = normalizeMessage(msg);
-            const peerId = normalized.peerId;
-            const fromId = normalized.fromId;
 
-            // Кэшируем информацию об авторе сообщения, если доступна
-            try {
-                const sender = await event.getSender?.();
-                if (sender) {
-                    entityCache.set(sender.id, sender);
-                    normalized.senderName = sender.title || [sender.firstName, sender.lastName].filter(Boolean).join(" ") || normalized.senderName;
+            // Кэшируем сущности события, если они пришли в апдейте
+            if (event.originalUpdate?._entities && typeof event.originalUpdate._entities.values === "function") {
+                for (const ent of event.originalUpdate._entities.values()) {
+                    if (ent?.id) entityCache.set(ent.id, ent);
                 }
+            }
+
+            let sender = null;
+            try {
+                sender = await event.getSender?.();
+                if (sender) entityCache.set(sender.id, sender);
             } catch {
                 // Игнорируем
             }
+
+            let chat = null;
+            try {
+                chat = await event.getChat?.();
+                if (chat) entityCache.set(chat.id, chat);
+            } catch {
+                // Игнорируем
+            }
+
+            const normalized = normalizeMessage(msg, chat || sender);
+            if (sender && (!normalized.senderName || normalized.senderName === "Собеседник")) {
+                const baseName = getEntityDisplayName(sender);
+                normalized.senderName = msg.postAuthor ? `${baseName} (${msg.postAuthor})` : baseName;
+            }
+
+            const peerId = normalized.peerId;
+            const fromId = normalized.fromId;
 
             bus.emit("new_message", {
                 peerId,
@@ -67,7 +85,35 @@ export function startTelegramListener(client) {
         try {
             const msg = event.message;
             if (!msg) return;
-            const normalized = normalizeMessage(msg);
+
+            if (event.originalUpdate?._entities && typeof event.originalUpdate._entities.values === "function") {
+                for (const ent of event.originalUpdate._entities.values()) {
+                    if (ent?.id) entityCache.set(ent.id, ent);
+                }
+            }
+
+            let sender = null;
+            try {
+                sender = await event.getSender?.();
+                if (sender) entityCache.set(sender.id, sender);
+            } catch {
+                // Игнорируем
+            }
+
+            let chat = null;
+            try {
+                chat = await event.getChat?.();
+                if (chat) entityCache.set(chat.id, chat);
+            } catch {
+                // Игнорируем
+            }
+
+            const normalized = normalizeMessage(msg, chat || sender);
+            if (sender && (!normalized.senderName || normalized.senderName === "Собеседник")) {
+                const baseName = getEntityDisplayName(sender);
+                normalized.senderName = msg.postAuthor ? `${baseName} (${msg.postAuthor})` : baseName;
+            }
+
             bus.emit("edited_message", {
                 peerId: normalized.peerId,
                 message: normalized,

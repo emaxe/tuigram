@@ -1,5 +1,5 @@
 import { Api, errors } from "teleproto";
-import { idToString, toMarkedId, getEntityDisplayName, entityCache, resolveEntity } from "./entities.js";
+import { idToString, toMarkedId, detectChatType, getEntityDisplayName, entityCache, resolveEntity } from "./entities.js";
 import { describeMedia } from "./formatter.js";
 import { config } from "../config.js";
 import { renderStrippedThumbnail, renderImageBuffer, renderMediaPreloader, getCachedImagePreview, isPreviewableMedia } from "../utils/image.js";
@@ -33,31 +33,77 @@ export function renderMessageThumbnail(rawMessage, {
 
     // Полноэкранные рендеры не кэшируем: одна такая строка весит сотни килобайт
     const cacheKey = useCache
-        ? (photo?.id ? `photo_${photo.id}` : (doc?.id ? `doc_${doc.id}` : `msg_${rawMessage.id}`))
-        : undefined;
+        ? (rawMessage.id ? `thumb_${rawMessage.id}@${maxWidth}x${maxHeight}` : null)
+        : null;
 
-    return renderStrippedThumbnail(stripped.bytes, { maxWidth, maxHeight, cacheKey }) || "";
+    return renderStrippedThumbnail(stripped.bytes, { maxWidth, maxHeight, cacheKey });
 }
 
 /**
  * Преобразует объект Message из MTProto в нормализованный объект для TUI.
  * @param {object} message
+ * @param {object|null} [chatEntity=null] сущность чата (канал, пользователь, группа)
  * @returns {object}
  */
-export function normalizeMessage(message) {
+export function normalizeMessage(message, chatEntity = null) {
     if (!message) return null;
 
     // fromId остаётся немаркированным: по нему ищется сущность в entityCache,
     // куда объекты кладутся по entity.id (тоже без маркера).
-    const fromId = idToString(message.fromId?.userId || message.fromId?.channelId || message.fromId?.chatId);
+    const fromId = idToString(message.fromId?.userId || message.fromId?.channelId || message.fromId?.chatId || message.senderId);
     // peerId маркируется, чтобы совпадать с dialog.id (см. toMarkedId).
     const peerId = toMarkedId(message.peerId);
 
-    // Извлекаем имя отправителя из кэша сущностей, если доступно
-    let senderName = message.out ? "Вы" : "Собеседник";
-    const cachedSender = entityCache.get(fromId);
-    if (cachedSender) {
-        senderName = getEntityDisplayName(cachedSender);
+    const postAuthor = message.postAuthor ? String(message.postAuthor).trim() : null;
+    const isPost = Boolean(
+        message.post ||
+        chatEntity?.broadcast ||
+        (chatEntity && detectChatType({ entity: chatEntity }) === "channel")
+    );
+
+    // Ищем сущность отправителя:
+    // 1. Уже прикреплённый teleproto sender
+    // 2. Вложенный кэш сущностей сообщения message._entities
+    // 3. Глобальный entityCache
+    let senderEntity = message.sender || null;
+    if (!senderEntity && message._entities && typeof message._entities.get === "function") {
+        senderEntity = (fromId && message._entities.get(fromId)) ||
+            (message.senderId && message._entities.get(idToString(message.senderId))) ||
+            (message.fromId && message._entities.get(toMarkedId(message.fromId))) ||
+            null;
+    }
+    if (!senderEntity) {
+        senderEntity = (fromId && entityCache.get(fromId)) ||
+            (message.senderId && entityCache.get(message.senderId)) ||
+            (message.fromId && entityCache.get(message.fromId)) ||
+            null;
+    }
+    if (senderEntity && senderEntity.id) {
+        entityCache.set(senderEntity.id, senderEntity);
+    }
+
+    let senderName = "";
+    if (isPost) {
+        // В вещательных каналах автор — сам канал (или подпись автора)
+        const channelEntity = senderEntity || chatEntity || message.chat || entityCache.get(peerId) || null;
+        const channelTitle = channelEntity ? getEntityDisplayName(channelEntity) : (chatEntity?.title || "");
+        if (postAuthor) {
+            senderName = channelTitle ? `${channelTitle} (${postAuthor})` : postAuthor;
+        } else {
+            senderName = channelTitle || "Канал";
+        }
+    } else if (message.out) {
+        senderName = "Вы";
+    } else if (senderEntity) {
+        const baseName = getEntityDisplayName(senderEntity);
+        senderName = postAuthor ? `${baseName} (${postAuthor})` : baseName;
+    } else if (chatEntity && (chatEntity.className === "User" || detectChatType({ entity: chatEntity }) === "user")) {
+        // В личном диалоге (1-на-1) входящее сообщение всегда от собеседника чата
+        senderName = getEntityDisplayName(chatEntity);
+    } else if (postAuthor) {
+        senderName = postAuthor;
+    } else {
+        senderName = "Собеседник";
     }
 
     // Реакции
@@ -105,6 +151,8 @@ export function normalizeMessage(message) {
         date: message.date ? message.date * 1000 : Date.now(),
         editDate: message.editDate ? message.editDate * 1000 : null,
         out: Boolean(message.out),
+        post: isPost,
+        postAuthor,
         text: message.message || "",
         fromId,
         senderName,
@@ -140,7 +188,15 @@ export async function fetchHistory(client, rawPeer, { limit = 40, offsetId = 0, 
     const load = async () => {
         for await (const msg of client.iterMessages(entity, { limit, offsetId, reverse })) {
             if (msg && msg.className !== "MessageEmpty") {
-                messages.push(normalizeMessage(msg));
+                // Сохраняем сущности, которые Telegram прислал вместе с сообщениями
+                if (msg._entities && typeof msg._entities.values === "function") {
+                    for (const ent of msg._entities.values()) {
+                        if (ent?.id) {
+                            entityCache.set(ent.id, ent);
+                        }
+                    }
+                }
+                messages.push(normalizeMessage(msg, entity));
             }
         }
         if (!reverse) {
@@ -158,6 +214,41 @@ export async function fetchHistory(client, rawPeer, { limit = 40, offsetId = 0, 
             await load();
         } else {
             throw err;
+        }
+    }
+
+    // Резолвим отправителей, которых ещё нет в кэше сущностей,
+    // чтобы в диалоге отображались реальные имена, а не «Собеседник».
+    for (const msg of messages) {
+        if (!msg.out && (!msg.senderName || msg.senderName === "Собеседник")) {
+            // 1. Попытка через rawMessage.getSender()
+            if (msg.rawMessage?.getSender) {
+                try {
+                    const sender = await msg.rawMessage.getSender();
+                    if (sender) {
+                        entityCache.set(sender.id, sender);
+                        const baseName = getEntityDisplayName(sender);
+                        msg.senderName = msg.postAuthor ? `${baseName} (${msg.postAuthor})` : baseName;
+                        continue;
+                    }
+                } catch {
+                    // Игнорируем
+                }
+            }
+
+            // 2. Попытка через resolveEntity по targetPeer
+            const targetPeer = msg.rawMessage?.fromId || msg.fromId || msg.rawMessage?.peerId || msg.peerId;
+            if (targetPeer) {
+                try {
+                    const sender = await resolveEntity(client, targetPeer);
+                    if (sender) {
+                        const baseName = getEntityDisplayName(sender);
+                        msg.senderName = msg.postAuthor ? `${baseName} (${msg.postAuthor})` : baseName;
+                    }
+                } catch {
+                    // Имя не резолвится — останется fallback
+                }
+            }
         }
     }
 
