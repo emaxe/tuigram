@@ -72,8 +72,12 @@ TuiGram lets you use Telegram entirely from the terminal: browse your dialog lis
 
 - **A complete interactive TUI**:
   - Two-pane adaptive layout (dialog list on the left, history and input box on the right);
+  - Automatic selection and opening of the first dialog upon application startup;
   - Keyboard and mouse control (left click selects a message, right click opens the action
     menu, clicking an image opens it full screen, clicking a video plays it, wheel scrolling);
+  - Fast scroll-to-bottom ("↓ Вниз" button and `End` / `G` shortcuts);
+  - Animated preloader when switching dialogs until message history is loaded;
+  - Message input field locking for channels and groups without posting permissions (showing 🔒 and reason);
   - Chat categories: All, Direct messages, Groups, Channels, Bots, Unread;
   - Instant search and filtering of chats by title and `@username` (`/`);
   - Live typing indicator with sender display name in real time;
@@ -475,6 +479,7 @@ TuiGram fully supports mouse interaction in terminals that support mouse reporti
 | **Right click** | **Message in the feed** | **Open the action menu (reactions, reply, edit, download, delete)** |
 | **Left click** | **Image preview inside a message** | **Open the image full screen** |
 | **Left click** | **Video preview inside a message** | **Play video in modal player** |
+| **Left click** | **"↓ Вниз" button in feed** | **Scroll down to latest messages (visible when scrolled up)** |
 | Left click | Empty area of the feed | Focus the message feed |
 | Left click | Header logo 🚀 | Open Help window |
 | Left click | Header active chat title | Open Chat Info window |

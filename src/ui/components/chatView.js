@@ -1,7 +1,7 @@
 import blessed from "neo-blessed";
 import { formatMessageTime, formatDateDivider } from "../../utils/time.js";
 import { formatMessageText, escapeBlessed } from "../../telegram/formatter.js";
-import { fg } from "../theme.js";
+import { fg, badge } from "../theme.js";
 
 import { getMessagePartAtPoint, isRightClick, stringCellWidth } from "../../utils/mouse.js";
 import { isMessageVideo } from "../../utils/video.js";
@@ -85,6 +85,23 @@ export function createChatView(screen, theme, {
     scrollBox.removeAllListeners("wheelup");
     scrollBox.removeAllListeners("wheeldown");
 
+    // Кнопка быстрой прокрутки к последним сообщениям
+    const scrollBottomBtn = blessed.box({
+        parent: container,
+        bottom: 0,
+        right: 2,
+        height: 1,
+        width: 10,
+        tags: true,
+        mouse: true,
+        hidden: true,
+        content: badge(theme.accent, theme.onAccent, "{bold}  ↓ Вниз  {/bold}"),
+        style: {
+            bg: theme.accent,
+            fg: theme.onAccent,
+        },
+    });
+
     /** Подсвечивает рамку, когда лента сообщений в фокусе. */
     function setFocusHighlight(active) {
         container.style.border.fg = active ? theme.borders.focusFg : theme.borders.fg;
@@ -99,6 +116,90 @@ export function createChatView(screen, theme, {
     let selectedId = null;
     let currentFirstUnreadId = null;
     let lastReportedMaxReadId = 0;
+
+    let isLoading = false;
+    let spinnerTimer = null;
+    let spinnerIndex = 0;
+    const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+    function getLoadingContent() {
+        const frame = SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length];
+        return `\n\n  ${fg(theme.accent, `${frame} Загрузка сообщений...`)}`;
+    }
+
+    function showLoading() {
+        isLoading = true;
+        currentMessages = [];
+        currentRanges = [];
+        selectedId = null;
+        updateScrollBottomBtn();
+        if (spinnerTimer) {
+            clearInterval(spinnerTimer);
+            spinnerTimer = null;
+        }
+        scrollBox.setContent(getLoadingContent());
+        screen.render();
+        spinnerTimer = setInterval(() => {
+            if (!isLoading) {
+                if (spinnerTimer) {
+                    clearInterval(spinnerTimer);
+                    spinnerTimer = null;
+                }
+                return;
+            }
+            spinnerIndex++;
+            scrollBox.setContent(getLoadingContent());
+            screen.render();
+        }, 80);
+    }
+
+    function stopLoading() {
+        isLoading = false;
+        if (spinnerTimer) {
+            clearInterval(spinnerTimer);
+            spinnerTimer = null;
+        }
+    }
+
+    function isAtBottom() {
+        const totalLines = scrollBox._clines?.length || scrollBox.getScrollHeight() || 0;
+        const visible = getVisibleHeight();
+        if (totalLines <= visible) return true;
+        const maxBase = Math.max(0, totalLines - visible);
+        const current = scrollBox.childBase || 0;
+        return current >= maxBase - 1;
+    }
+
+    function updateScrollBottomBtn() {
+        if (isLoading || currentMessages.length === 0 || isAtBottom()) {
+            if (!scrollBottomBtn.hidden) {
+                scrollBottomBtn.hide();
+                screen.render();
+            }
+        } else {
+            if (scrollBottomBtn.hidden) {
+                scrollBottomBtn.show();
+                scrollBottomBtn.setFront();
+                screen.render();
+            }
+        }
+    }
+
+    function handleScrollToBottomAction() {
+        scrollToBottom();
+        screen.render();
+        checkVisibleMessages();
+        updateScrollBottomBtn();
+    }
+
+    scrollBottomBtn.on("click", (data) => {
+        if (isRightClick(data)) return;
+        handleScrollToBottomAction();
+    });
+
+    scrollBottomBtn.on("press", () => {
+        handleScrollToBottomAction();
+    });
 
     // Кэш отформатированных строк сообщений для мгновенной перерисовки и прокрутки ленты
     const messageLinesCache = new Map();
@@ -198,6 +299,13 @@ export function createChatView(screen, theme, {
      * @returns {{ text: string, ranges: Array<object> }}
      */
     function renderMessagesWithRanges(messages, firstUnreadId = null) {
+        if (isLoading) {
+            return {
+                text: getLoadingContent(),
+                ranges: [],
+            };
+        }
+
         if (!messages || messages.length === 0) {
             return {
                 text: `\n\n  ${fg(theme.muted, "Сообщений пока нет. Напишите первое сообщение ниже!")}`,
@@ -287,6 +395,7 @@ export function createChatView(screen, theme, {
         const clamped = Math.max(0, Math.min(targetLine, maxBase));
         scrollBox.childBase = clamped;
         scrollBox.childOffset = 0;
+        updateScrollBottomBtn();
     }
 
     /**
@@ -297,6 +406,7 @@ export function createChatView(screen, theme, {
         const visible = getVisibleHeight();
         scrollBox.childBase = Math.max(0, totalLines - visible);
         scrollBox.childOffset = 0;
+        updateScrollBottomBtn();
     }
 
     /** Перерисовывает ленту, сохраняя позицию прокрутки (например, после смены выделения). */
@@ -306,6 +416,7 @@ export function createChatView(screen, theme, {
         currentRanges = rendered.ranges;
         scrollBox.setContent(rendered.text);
         scrollToLine(prevBase);
+        updateScrollBottomBtn();
         screen.render();
     }
 
@@ -360,6 +471,7 @@ export function createChatView(screen, theme, {
      * @param {boolean|object} [scrollOption=true]
      */
     function setMessages(messages, scrollOption = true) {
+        stopLoading();
         currentMessages = messages;
         const prevScroll = scrollBox.childBase || 0;
         const prevHeight = scrollBox.getScrollHeight();
@@ -413,6 +525,7 @@ export function createChatView(screen, theme, {
         }
         screen.render();
         checkVisibleMessages();
+        updateScrollBottomBtn();
     }
 
     /**
@@ -522,6 +635,7 @@ export function createChatView(screen, theme, {
         }
         screen.render();
         checkVisibleMessages();
+        updateScrollBottomBtn();
     }
 
     function handleScrollDown(step = 10) {
@@ -529,6 +643,7 @@ export function createChatView(screen, theme, {
         scrollToLine(current + step);
         screen.render();
         checkVisibleMessages();
+        updateScrollBottomBtn();
     }
 
     scrollBox.key(["pageup", "C-u"], () => handleScrollUp(10));
@@ -540,11 +655,13 @@ export function createChatView(screen, theme, {
         onLoadMoreHistory?.();
         screen.render();
         checkVisibleMessages();
+        updateScrollBottomBtn();
     });
-    scrollBox.key(["end"], () => {
+    scrollBox.key(["end", "G", "C-end"], () => {
         scrollToBottom();
         screen.render();
         checkVisibleMessages();
+        updateScrollBottomBtn();
     });
 
     scrollBox.on("wheelup", () => handleScrollUp(3));
@@ -596,14 +713,20 @@ export function createChatView(screen, theme, {
         }
     });
 
-    // Отслеживание прокрутки для обновления прочитанных сообщений
+    // Отслеживание прокрутки для обновления прочитанных сообщений и видимости кнопки [Вниз]
     scrollBox.on("scroll", () => {
         checkVisibleMessages();
+        updateScrollBottomBtn();
+    });
+
+    screen.on("resize", () => {
+        updateScrollBottomBtn();
     });
 
     return {
         container,
         scrollBox,
+        scrollBottomBtn,
         setMessages,
         setSelected,
         getSelected,
@@ -612,6 +735,7 @@ export function createChatView(screen, theme, {
         resetReadState: (initialReadMaxId = 0) => {
             lastReportedMaxReadId = initialReadMaxId;
             currentFirstUnreadId = null;
+            updateScrollBottomBtn();
         },
         checkVisibleMessages,
         loadMore: () => onLoadMoreHistory?.(),
@@ -619,7 +743,12 @@ export function createChatView(screen, theme, {
             scrollToBottom();
             screen.render();
             checkVisibleMessages();
+            updateScrollBottomBtn();
         },
         focus: () => scrollBox.focus(),
+        showLoading,
+        stopLoading,
+        isLoading: () => isLoading,
+        isScrollBottomVisible: () => !scrollBottomBtn.hidden,
     };
 }

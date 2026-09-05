@@ -404,6 +404,12 @@ export function createChatList(screen, theme, { onSelectDialog, onTabChange, onS
             currentTab = tab;
             renderTabs();
         },
+        selectIndex: (index) => {
+            if (index >= 0 && index < currentDialogs.length) {
+                list.select(index);
+                screen.render();
+            }
+        },
         focus: () => list.focus(),
         /** Завершает режим ввода в строке поиска (см. inputBox.release). */
         release: () => {

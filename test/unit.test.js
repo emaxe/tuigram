@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parsePeer, idToString, toMarkedId, detectChatType, getEntityDisplayName, entityCache } from "../src/telegram/entities.js";
+import { parsePeer, idToString, toMarkedId, detectChatType, getEntityDisplayName, entityCache, canSendMessages } from "../src/telegram/entities.js";
 import { Api } from "teleproto";
 import { formatMessageText, escapeBlessed, describeMedia, setMessagePalette } from "../src/telegram/formatter.js";
 import { getTheme, themes } from "../src/ui/theme.js";
@@ -205,6 +205,62 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     // Вычисление остатка при частичной загрузке истории с totalUnreadCount
     const partialHistory = largeHistory.slice(-50); // только последние 50 сообщений
     assert.equal(calculateRemainingUnreadCount(partialHistory, 140, 131), 92); // (131 - 50) + 11 = 92
+
+    // Тесты canSendMessages (проверка прав отправки сообщений в диалог)
+    assert.equal(canSendMessages(null).canSend, false);
+    assert.equal(canSendMessages(null).reason, "Чат не выбран");
+
+    // Личный диалог и Избранное
+    assert.equal(canSendMessages({ type: "user", entity: { className: "User", id: 1 } }).canSend, true);
+    assert.equal(canSendMessages({ type: "saved", entity: { isSelf: true } }).canSend, true);
+    assert.equal(canSendMessages({ type: "bot", entity: { className: "User", bot: true } }).canSend, true);
+
+    // Удалённый аккаунт
+    const deletedUser = canSendMessages({ type: "user", entity: { className: "User", deleted: true } });
+    assert.equal(deletedUser.canSend, false);
+    assert.match(deletedUser.reason, /удалён/);
+
+    // Канал без прав публикации
+    const broadcastChannel = canSendMessages({ type: "channel", entity: { broadcast: true, creator: false } });
+    assert.equal(broadcastChannel.canSend, false);
+    assert.match(broadcastChannel.reason, /недоступна/);
+
+    // Канал с правами создателя или админа
+    assert.equal(canSendMessages({ type: "channel", entity: { broadcast: true, creator: true } }).canSend, true);
+    assert.equal(canSendMessages({
+        type: "channel",
+        entity: { broadcast: true, adminRights: { postMessages: true } },
+    }).canSend, true);
+
+    // Группа: обычная, покинутая, исключённая
+    assert.equal(canSendMessages({ type: "group", entity: { className: "Chat" } }).canSend, true);
+    assert.equal(canSendMessages({ type: "group", entity: { className: "Chat", left: true } }).canSend, false);
+    assert.equal(canSendMessages({ type: "group", entity: { className: "Chat", kicked: true } }).canSend, false);
+
+    // Группа с ограничением на отправку для участников (defaultBannedRights)
+    const restrictedGroup = canSendMessages({
+        type: "supergroup",
+        entity: { className: "Channel", megagroup: true, defaultBannedRights: { sendMessages: true } },
+    });
+    assert.equal(restrictedGroup.canSend, false);
+    assert.match(restrictedGroup.reason, /ограничена/);
+
+    // Группа с персональным баном (bannedRights)
+    const bannedGroup = canSendMessages({
+        type: "supergroup",
+        entity: { className: "Channel", megagroup: true, bannedRights: { sendMessages: true, untilDate: Math.floor(Date.now() / 1000) + 3600 } },
+    });
+    assert.equal(bannedGroup.canSend, false);
+    assert.match(bannedGroup.reason, /запрещено/);
+
+    // Истёкший персональный бан
+    assert.equal(canSendMessages({
+        type: "supergroup",
+        entity: { className: "Channel", megagroup: true, bannedRights: { sendMessages: true, untilDate: Math.floor(Date.now() / 1000) - 60 } },
+    }).canSend, true);
+
+    // Запрещённый чат
+    assert.equal(canSendMessages({ type: "channel", entity: { className: "ChannelForbidden" } }).canSend, false);
 
     console.log("  ✓ entities.js tests passed");
 }
@@ -469,6 +525,54 @@ console.log("▶ Запуск юнит-тестов TuiGram...");
     input.write("тут?");
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(inputBox.textarea.getValue(), "тут?", "символы при вводе не должны дублироваться");
+
+    // Проверка прелоадера (showLoading / stopLoading / isLoading)
+    chatView.showLoading();
+    assert.equal(chatView.isLoading(), true, "chatView должен находиться в режиме загрузки");
+    assert.match(chatView.scrollBox.getContent(), /Загрузка сообщений/, "chatView должен показывать текст загрузки");
+    assert.equal(chatView.isScrollBottomVisible(), false, "кнопка прокрутки вниз скрыта во время загрузки");
+    chatView.setMessages(testMsgs, true);
+    assert.equal(chatView.isLoading(), false, "после установки сообщений режим загрузки должен сбрасываться");
+
+    // Проверка кнопки прокрутки к последним сообщениям (isScrollBottomVisible)
+    assert.equal(chatView.isScrollBottomVisible(), false, "на последнем сообщении кнопка [Вниз] должна быть скрыта");
+    chatView.scrollBox.scrollTo(5);
+    chatView.scrollBox.emit("scroll");
+    assert.equal(chatView.isScrollBottomVisible(), true, "при прокрутке вверх кнопка [Вниз] должна стать видимой");
+    chatView.scrollToBottom();
+    assert.equal(chatView.isScrollBottomVisible(), false, "после scrollToBottom кнопка [Вниз] должна скрыться");
+
+    // Проверка клика по кнопке [Вниз]
+    chatView.scrollBox.scrollTo(5);
+    chatView.scrollBox.emit("scroll");
+    assert.equal(chatView.isScrollBottomVisible(), true);
+    chatView.scrollBottomBtn.emit("click", { button: "left" });
+    assert.equal(chatView.isScrollBottomVisible(), false, "клик по кнопке [Вниз] должен скроллить вниз и скрывать кнопку");
+
+    // Проверка блокировки поля ввода (disabled state)
+    assert.equal(inputBox.isDisabled(), false, "по умолчанию ввод разблокирован");
+    inputBox.setDisabled(true, "Отправка в этот канал недоступна");
+    assert.equal(inputBox.isDisabled(), true, "поле ввода должно быть заблокировано");
+    assert.equal(inputBox.getDisabledReason(), "Отправка в этот канал недоступна");
+    assert.match(inputBox.contextBar.getContent(), /🔒/, "контекстная панель должна показывать иконку блокировки");
+    assert.match(inputBox.contextBar.getContent(), /недоступна/);
+    inputBox.textarea.setValue("попытка ввода");
+    assert.equal(inputBox.textarea.getValue(), "", "заблокированное поле ввода не должно принимать текст");
+    inputBox.setDisabled(false);
+    assert.equal(inputBox.isDisabled(), false, "поле ввода должно разблокироваться");
+    inputBox.textarea.setValue("разблокировано");
+    assert.equal(inputBox.textarea.getValue(), "разблокировано");
+    inputBox.textarea.setValue("");
+
+    // Проверка chatList.selectIndex
+    chatList.setDialogs([
+        { id: "1", title: "Чат 1", type: "user" },
+        { id: "2", title: "Чат 2", type: "user" },
+    ]);
+    chatList.selectIndex(1);
+    assert.equal(chatList.list.selected, 1, "selectIndex должен выбирать элемент по индексу");
+    chatList.selectIndex(0);
+    assert.equal(chatList.list.selected, 0, "selectIndex должен выбирать первый элемент");
 
     state.off("messages_updated", onUpdate);
 

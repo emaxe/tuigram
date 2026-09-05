@@ -16,7 +16,7 @@ import { createImageViewerModal } from "./components/modals/imageViewerModal.js"
 import { createVideoPlayerModal } from "./components/modals/videoPlayerModal.js";
 import { state } from "../state.js";
 import { config } from "../config.js";
-import { entityCache, getEntityDisplayName, resolveEntity } from "../telegram/entities.js";
+import { entityCache, getEntityDisplayName, resolveEntity, canSendMessages } from "../telegram/entities.js";
 import { fetchDialogs } from "../telegram/dialogs.js";
 import { setMessagePalette } from "../telegram/formatter.js";
 import { fetchHistory, sendMessage, editMessage, deleteMessages, sendFiles, downloadMedia, sendReaction, markAsRead, loadMessageImagePreview, downloadImageBuffer, renderMessageThumbnail, findFirstUnreadMessage, calculateRemainingUnreadCount } from "../telegram/messages.js";
@@ -206,10 +206,18 @@ export async function startTui(client, me) {
                     videoPlayerModal.play(msg);
                     break;
                 case "reply":
-                    inputBox.setContext("reply", msg);
+                    if (inputBox.isDisabled()) {
+                        statusBar.showMessage(inputBox.getDisabledReason() || "Отправка сообщений в этот чат недоступна", "warning");
+                    } else {
+                        inputBox.setContext("reply", msg);
+                    }
                     break;
                 case "edit":
-                    inputBox.setContext("edit", msg);
+                    if (inputBox.isDisabled()) {
+                        statusBar.showMessage(inputBox.getDisabledReason() || "Редактирование в этом чате недоступно", "warning");
+                    } else {
+                        inputBox.setContext("edit", msg);
+                    }
                     break;
                 case "delete":
                     releaseInputs();
@@ -297,29 +305,43 @@ export async function startTui(client, me) {
         }
     }
 
+    /**
+     * Открывает диалог, загружает его историю и отображает сообщения.
+     * @param {object} dialog
+     */
+    async function openDialog(dialog) {
+        if (!dialog) return;
+        flushPendingMarkAsRead();
+        state.setActiveChat(dialog);
+        chatView.resetReadState(dialog.readInboxMaxId || 0);
+
+        // Если сообщения диалога ещё не подгружены в память, показываем прелоадер
+        const cached = state.getMessages(dialog.id);
+        if (!cached || cached.length === 0) {
+            chatView.showLoading();
+        }
+        statusBar.showMessage(`Загрузка сообщений: ${dialog.title}...`, "info");
+
+        try {
+            // Загружаем всю пачку непрочитанных сообщений + запас из 20 прочитанных
+            // для контекста и правильного позиционирования разделителя
+            const limit = Math.max(50, Math.min(1000, (dialog.unreadCount || 0) + 20));
+            const history = await fetchHistory(client, dialog.peerId, { limit });
+            if (state.activeChat?.id !== dialog.id) return;
+            const firstUnread = findFirstUnreadMessage(history.messages, dialog);
+            state.setMessages(dialog.id, history.messages, { firstUnreadId: firstUnread?.id || null });
+            statusBar.showMessage(`Чат: ${dialog.title}`, "info");
+        } catch (err) {
+            if (state.activeChat?.id === dialog.id) {
+                chatView.setMessages([], false);
+                statusBar.showMessage(`Ошибка загрузки: ${err.message}`, "error");
+            }
+        }
+    }
+
     // 2. Список диалогов (левая панель)
     const chatList = createChatList(screen, theme, {
-        onSelectDialog: async (dialog) => {
-            flushPendingMarkAsRead();
-            state.setActiveChat(dialog);
-            chatView.resetReadState(dialog.readInboxMaxId || 0);
-            statusBar.showMessage(`Загрузка сообщений: ${dialog.title}...`, "info");
-
-            try {
-                // Загружаем всю пачку непрочитанных сообщений + запас из 20 прочитанных
-                // для контекста и правильного позиционирования разделителя
-                const limit = Math.max(50, Math.min(1000, (dialog.unreadCount || 0) + 20));
-                const history = await fetchHistory(client, dialog.peerId, { limit });
-                if (state.activeChat?.id !== dialog.id) return;
-                const firstUnread = findFirstUnreadMessage(history.messages, dialog);
-                state.setMessages(dialog.id, history.messages, { firstUnreadId: firstUnread?.id || null });
-                statusBar.showMessage(`Чат: ${dialog.title}`, "info");
-            } catch (err) {
-                if (state.activeChat?.id === dialog.id) {
-                    statusBar.showMessage(`Ошибка загрузки: ${err.message}`, "error");
-                }
-            }
-        },
+        onSelectDialog: (dialog) => openDialog(dialog),
         onTabChange: (tab) => {
             state.setFilterTab(tab);
         },
@@ -510,6 +532,10 @@ export async function startTui(client, me) {
 
     inputBox.container.on("click", (data) => {
         if (isRightClick(data)) return;
+        if (inputBox.isDisabled()) {
+            statusBar.showMessage(inputBox.getDisabledReason() || "Отправка сообщений в этот чат недоступна", "warning", 3000);
+            return;
+        }
         if (screen.focused !== inputBox.textarea) {
             inputBox.focus();
             statusBar.showMessage("Фокус: поле ввода", "info", 2000);
@@ -538,6 +564,11 @@ export async function startTui(client, me) {
             activeChat: chat,
             typingUser: state.getTypingUser(chat?.id),
         });
+
+        // Проверяем возможность отправки сообщений в выбранный чат
+        const sendCheck = canSendMessages(chat);
+        inputBox.setDisabled(!sendCheck.canSend, sendCheck.reason);
+
         const msgs = chat ? state.getMessages(chat.id) : [];
         chatView.setSelected(null);
         if (chat && msgs.length > 0) {
@@ -547,6 +578,8 @@ export async function startTui(client, me) {
             } else {
                 chatView.setMessages(msgs, true);
             }
+        } else if (chat) {
+            chatView.showLoading();
         } else {
             chatView.setMessages([], false);
         }
@@ -693,6 +726,10 @@ export async function startTui(client, me) {
             statusBar.showMessage("Сначала выберите чат для отправки файла!", "warning");
             return;
         }
+        if (inputBox.isDisabled()) {
+            statusBar.showMessage(inputBox.getDisabledReason() || "Отправка файлов в этот чат недоступна", "warning");
+            return;
+        }
         if (!files || files.length === 0) return;
 
         const chat = state.activeChat;
@@ -764,6 +801,10 @@ export async function startTui(client, me) {
     /** Включает режим ответа на выделенное сообщение, иначе — на последнее в ленте. */
     function startReply() {
         if (!state.activeChat) return;
+        if (inputBox.isDisabled()) {
+            statusBar.showMessage(inputBox.getDisabledReason() || "Отправка сообщений в этот чат недоступна", "warning");
+            return;
+        }
         const target = chatView.getTargetMessage();
         if (target) {
             inputBox.setContext("reply", target);
@@ -773,6 +814,10 @@ export async function startTui(client, me) {
     /** Включает правку выделенного своего сообщения, иначе — последнего своего. */
     function startEdit() {
         if (!state.activeChat) return;
+        if (inputBox.isDisabled()) {
+            statusBar.showMessage(inputBox.getDisabledReason() || "Редактирование в этом чате недоступно", "warning");
+            return;
+        }
         const selected = chatView.getSelected();
         if (selected?.out) {
             inputBox.setContext("edit", selected);
@@ -809,8 +854,13 @@ export async function startTui(client, me) {
     }
 
     function moveFocus(step) {
-        const current = FOCUS_ORDER.indexOf(detectFocus());
-        const next = FOCUS_ORDER[(current + step + FOCUS_ORDER.length) % FOCUS_ORDER.length];
+        let current = FOCUS_ORDER.indexOf(detectFocus());
+        let nextIndex = (current + step + FOCUS_ORDER.length) % FOCUS_ORDER.length;
+        let next = FOCUS_ORDER[nextIndex];
+        if (next === "input" && inputBox.isDisabled()) {
+            nextIndex = (nextIndex + step + FOCUS_ORDER.length) % FOCUS_ORDER.length;
+            next = FOCUS_ORDER[nextIndex];
+        }
         // Сначала выпускаем клавиатуру из активного поля ввода, иначе оно
         // заберёт фокус обратно своим обработчиком blur.
         releaseInputs();
@@ -844,6 +894,11 @@ export async function startTui(client, me) {
         screen.render();
     });
 
+    screen.key(["end", "C-end"], () => {
+        if (!state.activeChat || screen.focused === inputBox.textarea) return;
+        chatView.scrollToBottom();
+    });
+
     screen.key(["f1", "?"], () => {
         releaseInputs();
         helpModal.show();
@@ -861,6 +916,10 @@ export async function startTui(client, me) {
 
     screen.key(["C-o"], () => {
         if (state.activeChat) {
+            if (inputBox.isDisabled()) {
+                statusBar.showMessage(inputBox.getDisabledReason() || "Отправка файлов в этот чат недоступна", "warning");
+                return;
+            }
             releaseInputs();
             fileModal.show();
         } else {
@@ -918,7 +977,12 @@ export async function startTui(client, me) {
     try {
         const dialogs = await fetchDialogs(client, { limit: 100 });
         state.setDialogs(dialogs);
-        statusBar.showMessage(`Загружено ${dialogs.length} диалогов. Выберите чат и нажмите Enter.`, "success");
+        if (dialogs.length > 0) {
+            chatList.selectIndex(0);
+            await openDialog(dialogs[0]);
+        } else {
+            statusBar.showMessage("Список диалогов пуст", "info");
+        }
     } catch (err) {
         statusBar.showMessage(`Ошибка загрузки диалогов: ${err.message}`, "error");
     }

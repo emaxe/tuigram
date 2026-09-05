@@ -91,11 +91,21 @@ export function createInputBox(screen, theme, {
 
     let currentMode = null; // null | "reply" | "edit"
     let currentTarget = null; // object message
+    let isDisabled = false;
+    let disabledReason = "";
 
     const history = [];
     let historyIndex = -1;
 
     function renderContext() {
+        if (isDisabled) {
+            contextBar.setContent(
+                ` ${fg(theme.warning, "🔒")} ${fg(theme.dim, disabledReason || "Отправка сообщений недоступна в этом чате")}`
+            );
+            screen.render();
+            return;
+        }
+
         if (currentMode === "reply" && currentTarget) {
             const author = escapeBlessed(currentTarget.senderName || (currentTarget.post ? "Канал" : "Собеседник"));
             const preview = escapeBlessed((currentTarget.text || "").slice(0, 30));
@@ -124,7 +134,7 @@ export function createInputBox(screen, theme, {
     }
 
     contextBar.on("click", (data) => {
-        if (isRightClick(data)) return;
+        if (isDisabled || isRightClick(data)) return;
         const relX = data.x - (contextBar.aleft || 0);
         const action = getInputContextActionAt(relX, currentMode);
         if (action === "cancel") {
@@ -146,13 +156,31 @@ export function createInputBox(screen, theme, {
     });
 
     textarea.on("click", () => {
+        if (isDisabled) return;
         if (screen.focused !== textarea) {
             textarea.focus();
             screen.render();
         }
     });
 
+    const origReadInput = textarea.readInput.bind(textarea);
+    textarea.readInput = function(callback) {
+        if (isDisabled) {
+            return;
+        }
+        return origReadInput(callback);
+    };
+
+    const origSetValue = textarea.setValue.bind(textarea);
+    textarea.setValue = function(val) {
+        if (isDisabled && val) {
+            return origSetValue("");
+        }
+        return origSetValue(val);
+    };
+
     textarea.key(["enter"], () => {
+        if (isDisabled) return;
         const value = textarea.getValue().trim();
         if (!value) {
             // Textarea уже успел дописать перевод строки в своём обработчике — убираем его.
@@ -251,10 +279,32 @@ export function createInputBox(screen, theme, {
             screen.render();
         },
         focus: () => {
+            if (isDisabled) return;
             if (screen.focused !== textarea) {
                 textarea.focus();
             }
         },
+        /**
+         * Блокирует или разблокирует поле ввода сообщений.
+         * @param {boolean} disabled
+         * @param {string} [reason=""]
+         */
+        setDisabled: (disabled, reason = "") => {
+            isDisabled = Boolean(disabled);
+            disabledReason = reason;
+            if (isDisabled) {
+                currentMode = null;
+                currentTarget = null;
+                textarea.setValue("");
+                if (textarea._reading && typeof textarea._done === "function") {
+                    textarea._done("stop");
+                }
+            }
+            renderContext();
+            screen.render();
+        },
+        isDisabled: () => isDisabled,
+        getDisabledReason: () => disabledReason,
         /**
          * Завершает режим ввода, отдавая фокус предыдущей панели.
          * Нужно вызывать перед открытием модального окна: иначе textarea по blur

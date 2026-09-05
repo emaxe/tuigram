@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - English localization of the TUI and CLI interface strings.
 
+## [1.6.0] — 2026-09-05
+
+### Added
+
+- Message loading preloader: switching to a dialog now displays an animated loading indicator until message history is fetched, preventing premature "No messages yet" placeholder.
+- Scroll-to-bottom button ("↓ Вниз") and `End` / `G` keyboard shortcuts to quickly jump to the latest messages in the active chat; button appears when scrolling up and hides automatically at the bottom.
+- Automatic selection and opening of the first dialog upon application startup.
+- Message input field locking for channels and groups where the user lacks posting permissions (showing lock icon 🔒 and restriction reason).
+
 ## [1.5.1] — 2026-09-03
 
 ### Fixed
@@ -205,7 +214,8 @@ First public release.
 - A WCAG contrast test (3:1 threshold) applied to every theme **after** conversion
   to xterm-256 — the colors are checked exactly as the user sees them.
 
-[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/emaxe/tuigram/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/emaxe/tuigram/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/emaxe/tuigram/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/emaxe/tuigram/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/emaxe/tuigram/compare/v1.3.0...v1.4.0

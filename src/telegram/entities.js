@@ -211,3 +211,83 @@ export async function resolveEntity(client, rawPeer) {
         throw err;
     }
 }
+
+/**
+ * Проверяет, разрешена ли отправка сообщений в указанный диалог.
+ * Учитывает тип чата, удалённые аккаунты, права администратора в каналах,
+ * общие и персональные ограничения (defaultBannedRights / bannedRights).
+ * @param {object} dialog нормализованный объект диалога
+ * @returns {{ canSend: boolean, reason?: string }}
+ */
+export function canSendMessages(dialog) {
+    if (!dialog) {
+        return { canSend: false, reason: "Чат не выбран" };
+    }
+
+    const entity = dialog.entity || dialog.rawDialog?.entity || {};
+    const className = entity.className || "";
+
+    // 1. Запрещённые или недоступные чаты
+    if (className === "ChatForbidden" || className === "ChannelForbidden") {
+        return { canSend: false, reason: "Доступ к чату запрещён" };
+    }
+
+    // 2. Личные чаты и пользователи
+    if (dialog.type === "saved" || entity.isSelf) {
+        return { canSend: true };
+    }
+
+    if (dialog.type === "user" || className === "User") {
+        if (entity.deleted) {
+            return { canSend: false, reason: "Этот аккаунт удалён" };
+        }
+        return { canSend: true };
+    }
+
+    if (dialog.type === "bot") {
+        return { canSend: true };
+    }
+
+    // 3. Каналы (Broadcast)
+    const isBroadcast = dialog.type === "channel" || Boolean(entity.broadcast);
+    if (isBroadcast) {
+        const isCreator = Boolean(entity.creator);
+        const hasPostRights = Boolean(entity.adminRights?.postMessages);
+        if (!isCreator && !hasPostRights) {
+            return { canSend: false, reason: "Отправка сообщений в этот канал недоступна" };
+        }
+        return { canSend: true };
+    }
+
+    // 4. Группы и супергруппы
+    if (entity.left) {
+        return { canSend: false, reason: "Вы покинули эту группу" };
+    }
+    if (entity.kicked) {
+        return { canSend: false, reason: "Вы исключены из этой группы" };
+    }
+    if (entity.deactivated) {
+        return { canSend: false, reason: "Эта группа деактивирована" };
+    }
+
+    // Создатель или админ всегда может писать в группе
+    if (entity.creator || entity.adminRights) {
+        return { canSend: true };
+    }
+
+    // Персональные ограничения пользователя (bannedRights)
+    if (entity.bannedRights?.sendMessages) {
+        const until = entity.bannedRights.untilDate;
+        const isExpired = typeof until === "number" && until > 0 && until * 1000 <= Date.now();
+        if (!isExpired) {
+            return { canSend: false, reason: "Вам запрещено отправлять сообщения в этой группе" };
+        }
+    }
+
+    // Общие ограничения группы для участников (defaultBannedRights)
+    if (entity.defaultBannedRights?.sendMessages) {
+        return { canSend: false, reason: "Отправка сообщений в этой группе ограничена" };
+    }
+
+    return { canSend: true };
+}
